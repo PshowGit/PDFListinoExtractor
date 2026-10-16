@@ -76,6 +76,91 @@ def test_ordinamento_per_prezzo_con_mancanti_in_fondo(tabella):
     assert [p for p in prezzi if p is not None] == sorted(validi, reverse=True) and prezzi[-1] is None
 
 
+def _attendi(radice, condizione, secondi=60):
+    import time
+
+    limite = time.monotonic() + secondi
+    while not condizione():
+        if time.monotonic() > limite:
+            raise AssertionError("tempo scaduto")
+        radice.update()
+        time.sleep(0.05)
+
+
+def test_wizard_dalla_pdf_al_fornitore_salvato(radice, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    import config
+    from gui.wizard_fornitore import WizardFornitore
+    from tests.sintetico_generico import crea_listino_generico
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: None)
+    pdf = crea_listino_generico(tmp_path / "Listino ACME è.pdf")
+    salvati = []
+    w = WizardFornitore(radice, config.elenco_fornitori(), al_salvataggio=salvati.append, pdf=pdf)
+    w.withdraw()
+    _attendi(radice, lambda: w.modello is not None)  # analisi nel processo separato
+    assert [m.get() for m in w._menu_colonne] == ["Codice", "Descrizione", "EAN", "Prezzo"]
+    assert w.lbl_totale.cget("text") == "di 3"
+
+    # un cambio di mappatura arriva al modello e si vede sulla pagina
+    w.seleziona_colonna(2)
+    w.imposta_campo(2, "ignora")
+    assert w.modello.campi[2] == "ignora"
+    w.imposta_campo(2, "ean")
+
+    w._anteprima()
+    _attendi(radice, lambda: w._lavoro is None)
+    assert [a.codice for a in w.tabella.articoli()] == ["SP-100", "SP-200", "SP-300", "0007-X", "AMP-1"]
+    assert "5 articoli" in w.lbl_anteprima.cget("text")
+
+    w.ent_nome.insert(0, "ACME Audio")
+    assert w._salva()
+    assert salvati == ["acme_audio"]
+    assert (tmp_path / "PDFListinoExtractor" / "supplier_rules.json").read_bytes().startswith(b"\xef\xbb\xbf")
+    assert config.elenco_fornitori()["acme_audio"] == "ACME Audio"
+
+
+def test_wizard_con_pdf_non_valido_mostra_l_errore(radice, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    from gui.wizard_fornitore import WizardFornitore
+
+    errori = []
+    monkeypatch.setattr(messagebox, "showerror", lambda titolo, testo, **k: errori.append(testo))
+    rotto = tmp_path / "rotto.pdf"
+    rotto.write_bytes(b"x" * 50)
+    w = WizardFornitore(radice, {}, pdf=rotto)
+    w.withdraw()
+    _attendi(radice, lambda: errori)
+    assert "PDF" in errori[0] and w.modello is None
+    w.chiudi()
+
+
+def test_il_fornitore_salvato_compare_e_si_seleziona_nella_finestra_principale(radice, tmp_path, monkeypatch):
+    from config import salva_fornitore_personale
+    from gui.main_window import FinestraPrincipale
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    radice.destroy()
+    app = FinestraPrincipale()
+    app.withdraw()
+    try:
+        salva_fornitore_personale("acme", {"nome": "ACME", "colonne": [{"campo": "codice"}, {"campo": "prezzo"}]})
+        app._fornitore_salvato("acme")
+        assert app.menu_fornitore.get() == "ACME" and app.chiave_fornitore == "acme"
+        assert "ACME" in app.menu_fornitore.cget("values")
+        assert app.regole["colonne"][0]["campo"] == "codice"
+    finally:
+        app.destroy()
+    import customtkinter as ctk
+
+    nuova = ctk.CTk()
+    nuova.withdraw()
+    radice.destroy = nuova.destroy
+
+
 def test_la_finestra_principale_si_costruisce(radice):
     from gui.main_window import FinestraPrincipale
 

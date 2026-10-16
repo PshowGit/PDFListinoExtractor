@@ -1,7 +1,5 @@
 """Finestra principale: selezione PDF, estrazione in background, anteprima ed esportazione."""
 import logging
-import multiprocessing
-import queue
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -11,16 +9,17 @@ import config
 from config import elenco_fornitori, regole_fornitore
 from exporters.excel_exporter import EsportazioneFallita, esporta_listino, esporta_report_anomalie
 from extractors.pdf_reader import InfoPdf, PdfNonValido, verifica_pdf
+from gui.lavoro import LavoroInProcesso
 from gui.page_viewer import FinestraPagina
 from gui.preview_table import PreviewTable
 from percorsi import icona
-from processors.estrazione import RisultatoEstrazione, esegui_in_processo
+from processors.estrazione import RisultatoEstrazione
+from processors.lavori import ESTRAZIONE
 from processors.models import Articolo
 from processors.price_parser import formatta_prezzo
 from version import TITOLO_APP, __version__
 
 log = logging.getLogger(__name__)
-INTERVALLO_CODA_MS = 100
 
 
 class FinestraPrincipale(ctk.CTk):
@@ -36,10 +35,8 @@ class FinestraPrincipale(ctk.CTk):
         self.chiave_fornitore = next(iter(self.fornitori))
         self.regole = regole_fornitore(self.chiave_fornitore)
         self.info_pdf: InfoPdf | None = None
-        self._mp = multiprocessing.get_context("spawn")
-        self._coda = None
-        self._annulla = None
-        self._lavoro = None  # processo di estrazione in corso
+        self._lavoro: LavoroInProcesso | None = None  # estrazione in corso
+        self._wizard = None
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -70,6 +67,10 @@ class FinestraPrincipale(ctk.CTk):
             f, values=list(self.fornitori.values()), command=self._cambia_fornitore, width=280
         )
         self.menu_fornitore.grid(row=1, column=2, padx=4, pady=(2, 10), sticky="w")
+        self.btn_wizard = ctk.CTkButton(
+            f, text="Configura nuovo fornitore…", command=self._apri_wizard, width=200, fg_color="gray"
+        )
+        self.btn_wizard.grid(row=1, column=3, padx=10, pady=(2, 10), sticky="e")
         self.lbl_file = ctk.CTkLabel(f, text="Nessun file selezionato", anchor="w")
         self.lbl_file.grid(row=2, column=0, columnspan=3, padx=10, sticky="ew")
         self.lbl_info = ctk.CTkLabel(f, text="", anchor="w", text_color="gray")
@@ -132,67 +133,42 @@ class FinestraPrincipale(ctk.CTk):
             return
         self.barra.set(0)
         self.lbl_stato.configure(text="Avvio…")
-        self._coda = self._mp.Queue()
-        self._annulla = self._mp.Event()
-        # un processo e non un thread: v. esegui_in_processo per il perche'
-        self._lavoro = self._mp.Process(
-            target=esegui_in_processo,
-            args=(str(self.info_pdf.percorso), self.regole, self._coda, self._annulla),
-            daemon=True,
-            name="estrazione",
-        )
-        self._lavoro.start()
+        # in un processo e non in un thread: v. processors/lavori.py per il perche'
+        self._lavoro = LavoroInProcesso(
+            self,
+            ESTRAZIONE,
+            {"percorso": str(self.info_pdf.percorso), "regole": self.regole},
+            alla_fine=self._estrazione_finita,
+            all_errore=self._estrazione_fallita,
+            al_progresso=self._progresso,
+            all_annullamento=self._estrazione_annullata,
+        ).avvia()
         self._aggiorna_pulsanti()
-        self.after(INTERVALLO_CODA_MS, self._leggi_coda)
 
     def _annulla_estrazione(self):
-        if self._annulla is not None:
-            self._annulla.set()
+        if self._lavoro is not None:
+            self._lavoro.annulla()
             self.lbl_stato.configure(text="Annullamento in corso…")
 
-    def _leggi_coda(self):
-        # Si ridisegna solo l'ultimo avanzamento arrivato: aggiornare barra ed etichetta per ogni
-        # pagina in coda bloccava l'interfaccia fino a 300 ms per giro (misurato sul listino JBL).
-        ultimo = None
-        finale = None
-        try:
-            while True:
-                msg = self._coda.get_nowait()
-                if msg[0] == "progresso":
-                    ultimo = msg
-                else:
-                    finale = msg
-                    break
-        except queue.Empty:
-            pass
-        if ultimo is not None:
-            _, n, tot, art = ultimo
-            self.barra.set(n / tot)
-            self.lbl_stato.configure(text=f"Pagina {n} di {tot} · {art} articoli trovati")
-        if finale is None and not self._lavoro.is_alive():
-            # morto senza dire niente (memoria esaurita, processo ucciso...)
-            finale = ("errore", f"L'estrazione si e' interrotta (codice {self._lavoro.exitcode}).", "")
-        if finale is None:
-            self.after(INTERVALLO_CODA_MS, self._leggi_coda)
-            return
+    def _progresso(self, n: int, tot: int, art: int):
+        self.barra.set(n / tot)
+        self.lbl_stato.configure(text=f"Pagina {n} di {tot} · {art} articoli trovati")
 
-        self._lavoro.join(timeout=2)
+    def _estrazione_annullata(self):
         self._lavoro = None
-        tipo = finale[0]
-        if tipo == "fine":
-            self._estrazione_finita(finale[1])
-        elif tipo == "annullata":
-            self.lbl_stato.configure(text="Estrazione annullata")
-            self.barra.set(0)
-        else:
-            _, messaggio, dettagli = finale
-            if dettagli:
-                log.error("Estrazione fallita: %s\n%s", messaggio, dettagli)
-            self.lbl_stato.configure(text="Estrazione non riuscita")
-            messagebox.showerror("Errore", messaggio, parent=self)
+        self.lbl_stato.configure(text="Estrazione annullata")
+        self.barra.set(0)
         self._aggiorna_pulsanti()
 
+    def _estrazione_fallita(self, messaggio: str):
+        self._lavoro = None
+        self.lbl_stato.configure(text="Estrazione non riuscita")
+        self._aggiorna_pulsanti()
+        messagebox.showerror("Errore", messaggio, parent=self)
+
     def _estrazione_finita(self, ris: RisultatoEstrazione):
+        self._lavoro = None
+        self._aggiorna_pulsanti()
         self.tabella.carica(ris.articoli)
         self.barra.set(1)
         n, _ = self.tabella.conteggi()
@@ -358,6 +334,7 @@ class FinestraPrincipale(ctk.CTk):
 
         self.btn_seleziona.configure(state=stato(not occupato))
         self.menu_fornitore.configure(state=stato(not occupato))
+        self.btn_wizard.configure(state=stato(not occupato))
         self.btn_estrai.configure(state=stato(self.info_pdf is not None and not occupato))
         self.btn_annulla.configure(state=stato(occupato))
         if hasattr(self, "btn_esporta"):
@@ -368,8 +345,25 @@ class FinestraPrincipale(ctk.CTk):
 
     def _chiudi(self):
         if self._lavoro is not None:
-            self._annulla.set()
-            self._lavoro.join(timeout=1)
-            if self._lavoro.is_alive():
-                self._lavoro.terminate()
+            self._lavoro.termina()
+        if self._wizard is not None and self._wizard.winfo_exists():
+            self._wizard.chiudi()
         self.destroy()
+
+    # --- wizard -------------------------------------------------------------------------------
+
+    def _apri_wizard(self):
+        from gui.wizard_fornitore import WizardFornitore
+
+        if self._wizard is not None and self._wizard.winfo_exists():
+            self._wizard.lift()
+            return
+        iniziale = self.info_pdf.percorso if self.info_pdf else None
+        self._wizard = WizardFornitore(self, self.fornitori, al_salvataggio=self._fornitore_salvato, pdf=iniziale)
+
+    def _fornitore_salvato(self, chiave: str):
+        """Il wizard ha salvato un fornitore: lo si rende disponibile e lo si seleziona."""
+        self.fornitori = elenco_fornitori()
+        self.menu_fornitore.configure(values=list(self.fornitori.values()))
+        self.menu_fornitore.set(self.fornitori[chiave])
+        self._cambia_fornitore(self.fornitori[chiave])

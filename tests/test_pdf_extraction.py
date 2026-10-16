@@ -57,13 +57,13 @@ def test_annullamento(pdf_sintetico, regole):
 def _messaggi_dal_processo(pdf, regole, annulla_subito=False):
     import multiprocessing
 
-    from processors.estrazione import esegui_in_processo
+    from processors.lavori import ESTRAZIONE, esegui
 
     ctx = multiprocessing.get_context("spawn")
     coda, annulla = ctx.Queue(), ctx.Event()
     if annulla_subito:
         annulla.set()
-    p = ctx.Process(target=esegui_in_processo, args=(str(pdf), regole, coda, annulla))
+    p = ctx.Process(target=esegui, args=(ESTRAZIONE, {"percorso": str(pdf), "regole": regole}, coda, annulla))
     p.start()
     messaggi = []
     while not messaggi or messaggi[-1][0] == "progresso":

@@ -1,45 +1,35 @@
 {
+  "versione_schema": 2,
   "predefinito": "jbl_exhibo",
   "fornitori": {
     "jbl_exhibo": {
       "nome": "JBL (Exhibo) - Listino al pubblico",
-      "intestazioni": {
-        "modello": "Modello",
-        "descrizione": "Descrizione",
-        "prezzo": "Prezzo al"
-      },
-      "colonne_predefinite": {
-        "modello_x": 102.0,
-        "descrizione_x": 202.0,
-        "prezzo_x": 467.0
-      },
-      "tolleranza_colonna": 6.0,
-      "area": {
-        "y_min": 160.0,
-        "y_max": 780.0
-      },
-      "piede_pagina": [
-        "^Pagina \\d+ di \\d+$",
-        "^Exhibo S\\.p\\.A\\.",
-        "^Tel\\. 039"
+      "colonne": [
+        {
+          "campo": "identificativo",
+          "intestazioni": ["Modello"],
+          "x_relativo": 0.1714,
+          "contiene": ["modello", "codice", "ean"]
+        },
+        {"campo": "descrizione", "intestazioni": ["Descrizione"], "x_relativo": 0.3395},
+        {"campo": "prezzo", "intestazioni": ["Prezzo al", "Prezzo al Pubblico"], "x_relativo": 0.7849}
       ],
-      "testi_intestazione": [
-        "^Listino$",
-        "^Gennaio \\d{4}$",
-        "^Sostituisce e annulla i precedenti$",
-        "^Prezzi in Euro",
-        "^Modello$",
-        "^Descrizione$",
-        "^Prezzo al$",
-        "^Pubblico$"
-      ],
-      "soglia_titolo": 10.0,
-      "distanza_blocco": 14.0,
-      "tolleranza_riga": 2.5,
-      "regex_codice": "^\\((?P<codice>[^()]+)\\)$",
+      "ancora": "codice",
+      "spaziatura": {
+        "tolleranza_colonna_pt": 6.0,
+        "fattore_stacco": 1.5,
+        "fattore_titolo": 1.3,
+        "linee_divisorie": false
+      },
+      "regex": {
+        "codice": "^\\((?P<valore>[^()]+)\\)$",
+        "ean": "^\\d{8,14}$",
+        "prezzo": null
+      },
+      "formato_prezzo": "it",
       "codice_con_parentesi": true,
       "descrizione_vuota_usa_modello": true,
-      "formato_prezzo": "it",
+      "escludi": [],
       "prezzo_massimo": 1000000,
       "ocr": {
         "caratteri_minimi_pagina": 20,

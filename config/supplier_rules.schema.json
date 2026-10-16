@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PshowGit/PDFListinoExtractor/config/supplier_rules.schema.json",
+  "title": "Regole di estrazione dei listini PDF (versione 2)",
+  "type": "object",
+  "required": ["versione_schema", "fornitori"],
+  "properties": {
+    "versione_schema": {"const": 2},
+    "predefinito": {"type": "string"},
+    "sinonimi": {
+      "description": "Sinonimi aggiuntivi delle intestazioni, per campo; si sommano a quelli predefiniti.",
+      "type": "object",
+      "propertyNames": {"enum": ["modello", "codice", "ean", "descrizione", "prezzo"]},
+      "additionalProperties": {"type": "array", "items": {"type": "string", "minLength": 1}}
+    },
+    "fornitori": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z0-9_]{1,64}$"},
+      "additionalProperties": {"$ref": "#/$defs/fornitore"}
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "campo": {"enum": ["modello", "codice", "ean", "descrizione", "prezzo"]},
+    "regex": {"type": ["string", "null"], "minLength": 1},
+    "colonna": {
+      "type": "object",
+      "required": ["campo"],
+      "properties": {
+        "campo": {"enum": ["modello", "codice", "ean", "descrizione", "prezzo", "identificativo", "ignora"]},
+        "intestazioni": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "x_relativo": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "x_fine_relativo": {
+          "description": "Fine della colonna (frazione della larghezza): serve alle colonne allineate a destra senza intestazione.",
+          "type": ["number", "null"], "minimum": 0, "maximum": 1
+        },
+        "contiene": {
+          "description": "Solo per 'identificativo': i campi impilati nella colonna, dall'alto in basso.",
+          "type": "array", "items": {"$ref": "#/$defs/campo"}, "minItems": 2, "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "fornitore": {
+      "type": "object",
+      "required": ["nome", "colonne"],
+      "properties": {
+        "nome": {"type": "string", "minLength": 1},
+        "colonne": {"type": "array", "items": {"$ref": "#/$defs/colonna"}, "minItems": 1},
+        "ancora": {"enum": ["auto", "modello", "codice", "ean", "prezzo"]},
+        "spaziatura": {
+          "type": "object",
+          "properties": {
+            "tolleranza_colonna_pt": {"type": "number", "minimum": 0, "maximum": 50},
+            "fattore_stacco": {"type": "number", "minimum": 1, "maximum": 10},
+            "fattore_titolo": {"type": "number", "minimum": 1, "maximum": 10},
+            "linee_divisorie": {"type": "boolean"}
+          },
+          "additionalProperties": false
+        },
+        "regex": {
+          "type": "object",
+          "properties": {
+            "codice": {"$ref": "#/$defs/regex"},
+            "ean": {"$ref": "#/$defs/regex"},
+            "prezzo": {"$ref": "#/$defs/regex"}
+          },
+          "additionalProperties": false
+        },
+        "formato_prezzo": {"enum": ["it", "en", "auto"]},
+        "codice_con_parentesi": {"type": "boolean"},
+        "descrizione_vuota_usa_modello": {"type": "boolean"},
+        "escludi": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "prezzo_massimo": {"type": "number", "exclusiveMinimum": 0},
+        "ocr": {
+          "type": "object",
+          "properties": {
+            "caratteri_minimi_pagina": {"type": "integer", "minimum": 0},
+            "dpi": {"type": "integer", "minimum": 72, "maximum": 600},
+            "lingua": {"type": "string"},
+            "confidenza_minima": {"type": "number", "minimum": 0, "maximum": 100}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

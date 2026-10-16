@@ -14,13 +14,18 @@ import traceback
 from pathlib import Path
 
 OPZIONE = "--collaudo"
+# PDFListinoExtractor.exe --collaudo-wizard <pdf> <regole.json>: il wizard dall'analisi al salvataggio,
+# scrivendo nel file indicato e non nelle regole personali dell'utente
+OPZIONE_WIZARD = "--collaudo-wizard"
 
 
 def collaudo_richiesto(argv: list[str]) -> bool:
-    return OPZIONE in argv
+    return OPZIONE in argv or OPZIONE_WIZARD in argv
 
 
 def esegui_collaudo(argv: list[str]) -> int:
+    if OPZIONE_WIZARD in argv:
+        return esegui_collaudo_wizard(argv)
     i = argv.index(OPZIONE)
     pdf, xlsx = Path(argv[i + 1]), Path(argv[i + 2])
     report_path = xlsx.with_suffix(".collaudo.json")
@@ -108,3 +113,64 @@ def _collauda(pdf: Path, xlsx: Path, report: dict) -> None:
     app.after(300, avvia)
     app.after(600, fine)
     app.mainloop()
+
+
+def esegui_collaudo_wizard(argv: list[str]) -> int:
+    i = argv.index(OPZIONE_WIZARD)
+    pdf, regole = Path(argv[i + 1]), Path(argv[i + 2])
+    report: dict = {"pdf": str(pdf), "regole": str(regole), "esito": "fallito"}
+    try:
+        _collauda_wizard(pdf, regole, report)
+    except Exception as e:
+        report["errore"] = f"{type(e).__name__}: {e}"
+        report["traceback"] = traceback.format_exc()
+    regole.with_suffix(".collaudo.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    return 0 if report["esito"] == "ok" else 1
+
+
+def _collauda_wizard(pdf: Path, regole: Path, report: dict) -> None:
+    from tkinter import messagebox
+
+    import customtkinter as ctk
+    from PIL import ImageGrab
+
+    import config
+    from gui.wizard_fornitore import WizardFornitore
+    from processors.estrazione import estrai_listino
+
+    messagebox.showinfo = lambda *a, **k: None  # nessuna finestra modale da chiudere a mano
+    radice = ctk.CTk()
+    radice.withdraw()
+    w = WizardFornitore(radice, config.elenco_fornitori(), pdf=pdf, percorso_regole=regole)
+    w.geometry("1440x920+10+10")
+    w.attributes("-topmost", True)
+
+    def attendi(condizione, secondi=90):
+        limite = time.monotonic() + secondi
+        while not condizione():
+            if time.monotonic() > limite:
+                raise TimeoutError("tempo scaduto")
+            radice.update()
+            time.sleep(0.05)
+
+    attendi(lambda: w.modello is not None)
+    report["colonne"] = [[c.etichetta, campo] for c, campo in zip(w.modello.analisi.colonne, w.modello.campi, strict=True)]
+    report["ancora"] = w.modello.ancora
+    w._anteprima()
+    attendi(lambda: w._lavoro is None)
+    report["anteprima"] = w.lbl_anteprima.cget("text")
+    for _ in range(10):
+        radice.update()
+        time.sleep(0.05)
+    x, y = w.winfo_rootx(), w.winfo_rooty()
+    ImageGrab.grab((x, y, x + w.winfo_width(), y + w.winfo_height())).save(regole.with_suffix(".collaudo.png"))
+    w.ent_nome.insert(0, "Collaudo wizard")
+    salvato = w._salva()
+    radice.destroy()
+    dati = config._leggi(regole)
+    config.valida_schema(dati)
+    profilo = dati["fornitori"]["collaudo_wizard"]
+    ris = estrai_listino(pdf, profilo)
+    report.update(salvato=salvato, bom=regole.read_bytes().startswith(b"\xef\xbb\xbf"), articoli=len(ris.articoli),
+                  da_verificare=sum(1 for a in ris.articoli if a.tutte_le_anomalie()))
+    report["esito"] = "ok" if salvato and report["bom"] and ris.articoli else "fallito"

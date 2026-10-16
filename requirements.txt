@@ -1,10 +1,12 @@
 # Dipendenze dell'applicazione (con uv bastano `uv sync`; questo file serve a chi usa pip)
 customtkinter==6.0.0
+jsonschema==4.26.0    # validazione di supplier_rules.json (schema versione 2)
 openpyxl==3.1.5
 pillow==12.3.0
 pymupdf==1.28.2
 pytesseract==0.3.13   # facoltativo: serve solo per i PDF scansionati, insieme a Tesseract-OCR
 
 # Sviluppo
+pyinstaller==6.22.3
 pytest==9.1.1
 ruff==0.17.1

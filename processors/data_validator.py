@@ -3,6 +3,7 @@ from collections import defaultdict
 from decimal import Decimal
 
 from processors.models import Articolo
+from processors.profilo import CAMPI_DATI, campi_mappati, normalizza
 
 
 def ean_valido(ean: str) -> bool:
@@ -29,6 +30,14 @@ def valida(articoli: list[Articolo], regole: dict | None = None) -> None:
     regole = regole or {}
     prezzo_massimo = Decimal(str(regole.get("prezzo_massimo", 1_000_000)))
     conf_minima = regole.get("ocr", {}).get("confidenza_minima", 70)
+    # Si segnala come mancante solo cio' che il profilo prevede: un listino senza colonna Modello
+    # metteva "Modello mancante" su ogni riga, e un'anomalia su tutte le righe non ne indica nessuna
+    # (trovato nel wizard col PDF generico). Senza profilo valgono tutti i campi.
+    previsti = set(CAMPI_DATI)
+    if regole.get("colonne"):
+        previsti = campi_mappati(normalizza(regole))
+        if regole.get("descrizione_vuota_usa_modello", True) and "modello" in previsti:
+            previsti.add("descrizione")
 
     pagine_per_chiave: dict[str, list[int]] = defaultdict(list)
     for a in articoli:
@@ -39,14 +48,14 @@ def valida(articoli: list[Articolo], regole: dict | None = None) -> None:
     for a in articoli:
         an: list[str] = []
         note = a.note_estrazione
-        if not a.modello.strip() and "modello" not in note:
+        if "modello" in previsti and not a.modello.strip() and "modello" not in note:
             an.append("Modello mancante")
-        if not a.codice.strip() and "codice" not in note:
+        if "codice" in previsti and not a.codice.strip() and "codice" not in note:
             an.append("Codice mancante")
-        if not a.descrizione.strip():
+        if "descrizione" in previsti and not a.descrizione.strip():
             an.append("Descrizione mancante")
         if a.prezzo is None:
-            if "prezzo" not in note:
+            if "prezzo" in previsti and "prezzo" not in note:
                 an.append("Prezzo mancante")
         elif a.prezzo == 0:
             an.append("Prezzo pari a zero — verificare")
