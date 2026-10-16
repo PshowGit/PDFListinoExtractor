@@ -160,3 +160,54 @@ Limiti dichiarati:
   su due righe vanno mappati su una colonna composita, o ancorati a un altro campo.
 - Una corsa con più ancore e distacchi tutti uguali (nome del successivo attaccato all'EAN precedente,
   senza spazio in più) assegna le righe all'ancora precedente: l'anteprima lo mostra prima di salvare.
+
+## 5. Collaudo su un catalogo vero: Etabeta (Larentis), 387 pagine
+
+Primo listino di un altro fornitore, e il più lontano dal JBL: un catalogo impaginato, con più tabelle
+per pagina, ognuna con l'intestazione «MARCA | Articolo | titolo della tabella | Listino», immagini e testo
+promozionale in colonna, sezioni con colonne in posizioni diverse. Al primo tentativo **il wizard non
+funzionava**: nessuna intestazione riconosciuta, due colonne sbagliate. Dopo le correzioni sotto, con la sola
+proposta del wizard (pagina 22, nessuna correzione a mano):
+
+| Misura | Valore |
+|---|---|
+| Articoli estratti | 4.750, in 6,8 s |
+| Prezzi «€ x,xx» nel PDF / attribuiti a un articolo | 4.763 / 4.640 = **97,4%** |
+| Pagine con più prezzi attribuiti di quanti ne contenga | 0 (nessun prezzo inventato) |
+| Articoli «prezzo mancante» | 38 (erano 479 al primo giro completo) |
+| Listino JBL dopo tutte le correzioni | 673 articoli, 0 differenze |
+
+La misura di copertura è indipendente dal motore (`tools/misura_copertura.py`): conta le scritte con la forma
+di un prezzo e le confronta con gli articoli che ne hanno uno.
+
+Cosa il catalogo ha costretto a cambiare, in ordine di scoperta:
+
+1. **Testo rovinato dal PDF.** Acrobat Distiller con Calibri scrive «Ɵ», «Ʃ», «ƫ» al posto di «ti», «tt»,
+   «tti», in span separati («Proge» + «Ʃ» + «ato»); le legature vere (3.400, nelle descrizioni) sono seguite da
+   uno spazio spurio («Ampliﬁ catore»). `text_extractor` unisce gli span che si toccano e ricompone le parole.
+2. **«Listino» è il nome della colonna prezzi.** Era escluso dai sinonimi perché nel JBL è il titolo; ora vale,
+   e il titolo non diventa un'intestazione perché riconosce una colonna sola.
+3. **Più intestazioni per pagina**, tutte tolte dal corpo e usate come taglio e come categoria
+   («MOGAMI · CAVI MOGAMI CAT-5ProB-3381/RJ45»). Marca e titolo cambiano a ogni tabella: si abbinano alle
+   colonne del profilo per posizione, non per nome.
+4. **Titolo centrato.** L'etichetta della descrizione comincia a x≈290, il testo a 238: l'inizio della colonna
+   si ricava, pagina per pagina, dal testo sotto l'etichetta (le sezioni hanno colonne in posizioni diverse).
+5. **Colonna della marca.** Testo centrato e didascalie: la pre-analisi la propone «ignora» se il testo non è
+   allineato o è meno di un decimo della colonna più piena.
+6. **Codice centrato nella cella**, righe equidistanti e nessuno spazio fra un articolo e l'altro: per le pagine
+   così (riconosciute dai dati) la cella è simmetrica attorno al codice.
+7. **Linee di griglia** fra le celle. Il bordo sta 0,2 pt *sotto* la cima del testo: taglia una tolleranza più in
+   alto. Con una griglia fitta ogni cella è un articolo, anche quando il modello è un nome («IsoLater»), ma solo se
+   ha un prezzo o un modello con l'aspetto di un codice.
+8. **Tabelle che proseguono in cima alla pagina** senza intestazione: non si scarta più ciò che sta sopra la prima.
+9. **Testo descrittivo nella colonna Articolo** (pagine di schede tecniche): se nel documento i modelli sono quasi
+   sempre codici (87% qui), l'ancora accetta solo righe con quell'aspetto.
+
+Limiti che restano, sul catalogo:
+
+- **Sezione AV-MATRIX (pagine 330-336)**: il codice è scritto dentro la descrizione («Articolo: P20-4KB») e non
+  in una colonna. Un profilo a colonne non la descrive: ~50 prezzi su 123 dei mancanti sono lì.
+- Le pagine 1-3 (indice) e alcune schede producono «prezzo non riconosciuto» («da Pagina 223», «Booster»):
+  sono segnalati, non nascosti.
+- Senza griglia, un nome su due righe nella colonna Modello diventa due articoli.
+- 474 duplicati segnalati: il catalogo ripete gli stessi articoli in sezioni diverse; non si eliminano.

@@ -7,6 +7,7 @@ una frazione della pagina: lo stesso codice legge un listino A4 in corpo 7 e uno
 import itertools
 import re
 import statistics
+from collections import Counter
 from dataclasses import dataclass, field
 
 from processors.models import Span
@@ -79,6 +80,8 @@ class Intestazione:
     y0: float
     y1: float  # fine dell'intestazione, comprese le etichette su due righe ("Prezzo al / Pubblico")
     colonne: list[ColonnaFisica] = field(default_factory=list)
+    # etichette che nessun nome riconosce (marca, titolo della tabella): diventano la categoria
+    variabili: list[str] = field(default_factory=list)
 
 
 def raggruppa_righe(spans: list[Span], tolleranza: float) -> list[Riga]:
@@ -140,10 +143,13 @@ def e_ripetuta(riga: Riga, altezza: float, firme: set[tuple[int, str]]) -> bool:
 def _indice_colonna(testo: str, profilo: dict) -> int | None:
     """Colonna del profilo riconosciuta da un'etichetta: prima le intestazioni dichiarate, poi i sinonimi."""
     t = normalizza_testo(testo)
+    parole = set(t.split())
     for i, col in enumerate(profilo["colonne"]):
         for etichetta in col.get("intestazioni", []):
             e = normalizza_testo(etichetta)
-            if e and (t == e or t.startswith(e + " ")):
+            # anche un'etichetta che contiene tutte le parole di quella dichiarata: nello stesso
+            # catalogo Etabeta la colonna si chiama "Articolo" e, in alcune sezioni, "Codice/Articolo"
+            if e and (t == e or t.startswith(e + " ") or (len(e) > 3 and set(e.split()) <= parole)):
                 return i
     campo, _ = campo_da_intestazione(testo, profilo.get("sinonimi"))
     if campo is None:
@@ -155,36 +161,99 @@ def _indice_colonna(testo: str, profilo: dict) -> int | None:
     return None
 
 
-def rileva_intestazione(righe_pagina: list[Riga], profilo: dict, metr: Metriche) -> Intestazione | None:
-    """La prima riga in cui almeno due etichette riconoscono colonne diverse del profilo."""
-    for n, riga in enumerate(righe_pagina):
-        riconosciute: dict[int, Span] = {}
-        for s in sorted(riga.spans, key=lambda s: s.x0):
-            i = _indice_colonna(s.testo, profilo)
-            if i is not None and i not in riconosciute:
-                riconosciute[i] = s
-        if len(riconosciute) < 2:
+def _per_posizione(variabili: list[Span], riconosciute: dict[int, Span], profilo: dict,
+                   larghezza: float | None) -> dict[int, Span]:
+    """Etichette non riconosciute per nome, abbinate alle colonne del profilo per posizione.
+
+    Nel catalogo Etabeta l'intestazione e' «MARCA | Articolo | titolo della tabella | Listino»: marca e
+    titolo cambiano a ogni tabella, quindi nessun nome li riconosce. Un'etichetta che sta fra due
+    riconosciute puo' essere solo una colonna del profilo che sta fra le due, la piu' vicina alla sua
+    posizione salvata. Serve un profilo con le posizioni: col profilo generico della pre-analisi
+    l'abbinamento non si fa, e il campo lo propone il contenuto.
+    """
+    cols = profilo["colonne"]
+    if larghezza is None or not any(c.get("x_relativo") is not None for c in cols):
+        return {}
+    ordinate = sorted(riconosciute.items(), key=lambda kv: kv[1].x0)
+    assegnate: dict[int, Span] = {}
+    for u in sorted(variabili, key=lambda s: s.x0):
+        sinistra = max((i for i, s in ordinate if s.x0 < u.x0), default=-1)
+        destra = min((i for i, s in ordinate if s.x0 > u.x0), default=len(cols))
+        candidate = [i for i in range(sinistra + 1, destra)
+                     if i not in riconosciute and i not in assegnate and cols[i].get("x_relativo") is not None]
+        if not candidate:
             continue
-        colonne = [ColonnaFisica(s.x0, i, s.testo, s.x1) for i, s in riconosciute.items()]
-        # le etichette non riconosciute della stessa riga sono colonne vere, da non far sconfinare
-        for s in riga.spans:
-            if all(abs(s.x0 - c.x) > 1 for c in colonne) and _indice_colonna(s.testo, profilo) is None:
-                colonne.append(ColonnaFisica(s.x0, None, s.testo, s.x1))
-        colonne.sort(key=lambda c: c.x)
-        y1 = riga.y1
-        corpo_etichette = statistics.median(s.size for s in riga.spans)
-        # seconda riga di un'etichetta ("Prezzo al" / "Pubblico"): subito sotto, allineata a
-        # un'etichetta e dello stesso corpo. Il corpo conta: un titolo di sezione allineato alla
-        # prima colonna veniva scambiato per il seguito dell'intestazione (trovato col PDF generico)
-        for seguente in righe_pagina[n + 1:]:
-            vicina = seguente.y0 - y1 <= corpo_etichette
-            allineata = all(any(abs(s.x0 - c.x) <= 2 for c in colonne) for s in seguente.spans)
-            stesso_corpo = all(abs(s.size - corpo_etichette) <= 0.15 * corpo_etichette for s in seguente.spans)
-            if not (vicina and allineata and stesso_corpo):
-                break
-            y1 = seguente.y1
-        return Intestazione(riga.y0, y1, colonne)
-    return None
+
+        def distanza(i, u=u):
+            x = cols[i]["x_relativo"] * larghezza
+            return 0.0 if u.x0 - 6 <= x <= u.x1 + 6 else min(abs(x - u.x0), abs(x - u.x1))
+
+        migliore = min(candidate, key=distanza)
+        if distanza(migliore) <= 0.25 * larghezza:
+            assegnate[migliore] = u
+    return assegnate
+
+
+def rileva_intestazioni(righe_pagina: list[Riga], profilo: dict, metr: Metriche,
+                        larghezza: float | None = None) -> list[Intestazione]:
+    """Tutte le righe d'intestazione della pagina: quelle con almeno due etichette che riconoscono colonne
+    diverse del profilo. Un catalogo ne ha una per tabella, piu' tabelle per pagina."""
+    trovate: list[Intestazione] = []
+    n = 0
+    while n < len(righe_pagina):
+        intest, n = _intestazione_da(righe_pagina, n, profilo, metr, larghezza)
+        if intest is not None:
+            trovate.append(intest)
+    return trovate
+
+
+def rileva_intestazione(righe_pagina: list[Riga], profilo: dict, metr: Metriche,
+                        larghezza: float | None = None) -> Intestazione | None:
+    """La prima riga d'intestazione della pagina, se c'e'."""
+    trovate = rileva_intestazioni(righe_pagina, profilo, metr, larghezza)
+    return trovate[0] if trovate else None
+
+
+def _intestazione_da(righe_pagina, n, profilo, metr, larghezza):
+    """Intestazione che comincia alla riga n (o None) e indice della riga da cui riprendere la ricerca."""
+    riga = righe_pagina[n]
+    riconosciute: dict[int, Span] = {}
+    variabili: list[Span] = []
+    for s in sorted(riga.spans, key=lambda s: s.x0):
+        i = _indice_colonna(s.testo, profilo)
+        if i is not None and i not in riconosciute:
+            riconosciute[i] = s
+        elif i is None:
+            variabili.append(s)
+    if len(riconosciute) < 2:
+        return None, n + 1
+    per_posizione = _per_posizione(variabili, riconosciute, profilo, larghezza)
+    colonne = [ColonnaFisica(s.x0, i, s.testo, s.x1) for i, s in (*riconosciute.items(), *per_posizione.items())]
+    # le etichette non riconosciute della stessa riga sono colonne vere, da non far sconfinare
+    for s in variabili:
+        if s not in per_posizione.values() and all(abs(s.x0 - c.x) > 1 for c in colonne):
+            colonne.append(ColonnaFisica(s.x0, None, s.testo, s.x1))
+    colonne.sort(key=lambda c: c.x)
+    # categoria: le etichette che non sono il nome di un campo (marca, titolo della tabella), anche se il
+    # profilo le ha salvate come intestazione della loro colonna
+    categoria = [s.testo for s in sorted(riga.spans, key=lambda s: s.x0)
+                 if campo_da_intestazione(s.testo, profilo.get("sinonimi"))[0] is None]
+    intest = Intestazione(riga.y0, riga.y1, colonne, categoria)
+    corpo_etichette = statistics.median(s.size for s in riga.spans)
+    # seconda riga di un'etichetta ("Prezzo al" / "Pubblico"): subito sotto, allineata a
+    # un'etichetta e dello stesso corpo. Il corpo conta: un titolo di sezione allineato alla
+    # prima colonna veniva scambiato per il seguito dell'intestazione (trovato col PDF generico)
+    n += 1
+    while n < len(righe_pagina):
+        seguente = righe_pagina[n]
+        vicina = seguente.y0 - intest.y1 <= corpo_etichette
+        allineata = all(any(abs(s.x0 - c.x) <= 2 for c in colonne) for s in seguente.spans)
+        stesso_corpo = all(abs(s.size - corpo_etichette) <= 0.15 * corpo_etichette for s in seguente.spans)
+        if not (vicina and allineata and stesso_corpo):
+            break
+        intest.y1 = seguente.y1
+        n += 1
+    return intest, n
 
 
 def risolvi_colonne(intestazione: Intestazione | None, profilo: dict, larghezza: float) -> list[ColonnaFisica]:
@@ -198,6 +267,41 @@ def risolvi_colonne(intestazione: Intestazione | None, profilo: dict, larghezza:
             etichetta = f"{col['campo'].capitalize()}, x≈{x:.0f}"  # nelle note: quale colonna ha fallito
             colonne.append(ColonnaFisica(x, i, etichetta, fine * larghezza if fine is not None else None))
     return sorted(colonne, key=lambda c: c.x)
+
+
+def allinea_al_contenuto(colonne: list[ColonnaFisica], spans: list[Span], tolleranza: float = 6.0,
+                         minimo: int = 2, profilo: dict | None = None,
+                         larghezza: float | None = None) -> list[ColonnaFisica]:
+    """Inizio delle colonne d'intestazione spostato sul testo della pagina, quando l'etichetta e' centrata.
+
+    Il titolo di una tabella Etabeta («MODULI INPUT PER MATRICI VIDEO X9») e' centrato e comincia a
+    x≈290, la sua descrizione a x=238: con l'inizio dell'etichetta, una riga corta come «IR» finiva
+    nella colonna dei codici e diventava un articolo. Si calcola su ogni pagina, perche' nello stesso
+    catalogo le sezioni hanno colonne in posizioni diverse (Articolo a x=167 o a x=136). L'inizio si
+    sposta solo all'indietro e mai oltre la fine dell'etichetta precedente; con etichette allineate al
+    testo (JBL) non si sposta affatto.
+    """
+    per: dict[int, list[Span]] = {}
+    for s in spans:
+        n = assegna_colonna(s, colonne, tolleranza)
+        if n is not None:
+            per.setdefault(n, []).append(s)
+    nuove = []
+    for n, c in enumerate(colonne):
+        membri = per.get(n, [])
+        limite = colonne[n - 1].x1 if n > 0 and colonne[n - 1].x1 is not None else 0.0
+        x = c.x
+        moda, quanti = Counter(round(s.x0) for s in membri).most_common(1)[0] if membri else (None, 0)
+        if c.x1 is not None and moda is not None and quanti >= minimo and limite < moda < c.x - 1:
+            x = float(moda)
+        elif profilo is not None and larghezza and c.indice is not None:
+            # troppo poco testo sulla pagina per dirlo (una tabella che comincia in fondo): vale la
+            # posizione salvata nel profilo, se cade fra l'etichetta precedente e questa
+            x_profilo = profilo["colonne"][c.indice].get("x_relativo")
+            if x_profilo is not None and limite < x_profilo * larghezza < c.x - 1:
+                x = x_profilo * larghezza
+        nuove.append(ColonnaFisica(x, c.indice, c.etichetta, c.x1))
+    return nuove
 
 
 def assegna_colonna(span: Span, colonne: list[ColonnaFisica], tolleranza: float) -> int | None:

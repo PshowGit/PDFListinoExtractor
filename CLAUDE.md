@@ -16,7 +16,7 @@ Applicazione desktop Windows (Python 3.12, customtkinter) che estrae da un listi
 
 ```powershell
 uv run python main.py                                   # avvio dal sorgente
-uv run pytest -q                                        # suite completa (125 test, 1 saltato senza Tesseract)
+uv run pytest -q                                        # suite completa (153 test, 1 saltato senza Tesseract)
 uv run pytest tests/test_pdf_extraction.py -v           # un file
 uv run pytest tests/test_gui.py::test_ordinamento_per_prezzo_con_mancanti_in_fondo -v   # un test
 uv run ruff check .                                     # lint (config in pyproject.toml)

@@ -9,29 +9,38 @@ ed estrazione non possono contraddirsi.
 """
 import re
 import statistics
+from collections import Counter
 from dataclasses import dataclass, field
 
 from extractors.pdf_reader import apri_pdf
 from extractors.table_extractor import (
     ColonnaFisica,
     Metriche,
+    Riga,
+    allinea_al_contenuto,
     assegna_colonna,
     e_ripetuta,
     firme_ripetute,
     linee_divisorie,
     metriche,
     raggruppa_righe,
-    rileva_intestazione,
+    rileva_intestazioni,
 )
 from extractors.text_extractor import estrai_span
 from processors.data_validator import ean_valido
 from processors.estrazione import _campione
 from processors.models import Span
 from processors.price_parser import parse_prezzo
-from processors.profilo import CAMPI_DATI, CONTIENE_PREDEFINITO, REGEX_CODICE_PARENTESI, normalizza
+from processors.profilo import (
+    CAMPI_DATI,
+    CONTIENE_PREDEFINITO,
+    REGEX_CODICE_PARENTESI,
+    campo_da_intestazione,
+    normalizza,
+)
 
 _CODICE_PARENTESI = re.compile(REGEX_CODICE_PARENTESI)
-_ASPETTO_PREZZO = re.compile(r"\d[.,]\d{1,2}\b|€|\bEUR\b", re.IGNORECASE)
+_ASPETTO_PREZZO = re.compile(r"\d[.,]\d{1,2}\b|â‚¬|\bEUR\b", re.IGNORECASE)
 _CODICE_SECCO = re.compile(r"^(?=.*\d)[A-Za-z0-9][A-Za-z0-9._/\-]{2,}$")  # un token con cifre: "AB-123/4"
 _IT, _EN = re.compile(r"\d,\d{2}$"), re.compile(r"\d\.\d{2}$")
 QUOTA_PREVALENTE = 0.6
@@ -158,7 +167,7 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
     """Analisi su pagine gia' lette: {numero: (spans, larghezza, altezza)}; `pagina` e' quella mostrata."""
     from processors.article_parser import ParserListino
 
-    spans_pag, larghezza, altezza = pagine[pagina]
+    _, larghezza, altezza = pagine[pagina]
     metr = metriche([s for s, _, _ in pagine.values()])
     tol = metr.tolleranza_riga
     firme = firme_ripetute([(s, h) for s, _, h in pagine.values()], tol)
@@ -166,19 +175,31 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
 
     def corpo_e_intestazione(spans, alt):
         righe = raggruppa_righe(spans, tol)
-        intest = rileva_intestazione(righe, generico, metr)
+        # tutte le intestazioni: un catalogo ne ha una per tabella, e le successive non sono contenuto
+        intestazioni = rileva_intestazioni(righe, generico, metr)
+        prima = intestazioni[0] if intestazioni else None
         corpo = [
             s for r in righe
-            if not e_ripetuta(r, alt, firme) and (intest is None or r.y0 > intest.y1)
+            if not e_ripetuta(r, alt, firme) and (prima is None or r.y0 > prima.y1)
+            and not any(i.y0 - tol <= r.y0 <= i.y1 for i in intestazioni[1:])
             for s in r.spans if s.size < 1.3 * metr.corpo
         ]
-        return corpo, intest
+        return corpo, prima
 
-    _corpo_pag, intest = corpo_e_intestazione(spans_pag, altezza)
-    corpi = {n: corpo_e_intestazione(s, h)[0] for n, (s, _, h) in pagine.items()}
+    letture = {n: corpo_e_intestazione(s, h) for n, (s, _, h) in pagine.items()}
+    corpi = {n: corpo for n, (corpo, _) in letture.items()}
+    intest = letture[pagina][1]
     avvisi = []
+    # colonne di ogni pagina: quelle della sua intestazione, allineate al suo testo. Nello stesso
+    # catalogo le sezioni hanno colonne in posizioni diverse, e una misura sull'intero campione
+    # mescolava le sezioni (Articolo a x=167 in una, a x=136 in un'altra)
+    colonne_di: dict[int, list[ColonnaFisica]] = {}
     if intest is not None:
-        fisiche = intest.colonne
+        struttura = [c.indice for c in intest.colonne]
+        for n, (corpo, prima) in letture.items():
+            if prima is not None and [c.indice for c in prima.colonne] == struttura:
+                colonne_di[n] = allinea_al_contenuto(prima.colonne, corpo)
+        fisiche = colonne_di[pagina]
         partenze = [(c.x, c.etichetta, generico["colonne"][c.indice]["campo"] if c.indice is not None else None)
                     for c in fisiche]
     else:
@@ -187,27 +208,46 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
         ricostruite = colonne_senza_intestazione(tutti, metr, larghezza)
         fisiche = [ColonnaFisica(x0, i, f"Colonna {i + 1}", x1) for i, (x0, x1) in enumerate(ricostruite)]
         partenze = [(c.x, c.etichetta, None) for c in fisiche]
+        colonne_di = dict.fromkeys(corpi, fisiche)
     if not partenze:
         raise ValueError(f"Pagina {pagina}: nessuna colonna riconoscibile (la pagina ha testo selezionabile?)")
 
     xs = [x for x, _, _ in partenze]
     testi: list[list[str]] = [[] for _ in partenze]
     esempi: list[list[str]] = [[] for _ in partenze]
-    for n, spans in corpi.items():
-        for gruppo in _righe_per_colonna(spans, fisiche, tol):
+    spans_col: list[list[Span]] = [[] for _ in partenze]
+    allineato: list[list[tuple[float, int]]] = [[] for _ in partenze]  # (allineamento, righe) per pagina
+    for n, cols in colonne_di.items():
+        per_pagina: list[list[Riga]] = [[] for _ in partenze]
+        for gruppo in _righe_per_colonna(corpi[n], cols, tol):
             for indice, riga in gruppo:
                 testi[indice].append(riga.testo)
-                if n == pagina and len(esempi[indice]) < 4 and riga.testo not in esempi[indice]:
-                    esempi[indice].append(riga.testo)
+                per_pagina[indice].append(riga)
+                if n == pagina:
+                    spans_col[indice].extend(riga.spans)
+                    if len(esempi[indice]) < 4 and riga.testo not in esempi[indice]:
+                        esempi[indice].append(riga.testo)
+        for indice, righe in enumerate(per_pagina):
+            if len(righe) >= 3:
+                allineato[indice].append((allineamento(righe), len(righe)))
+
+    def allineamento_medio(i: int) -> float:
+        totale = sum(n for _, n in allineato[i])
+        return sum(a * n for a, n in allineato[i]) / totale if totale else 0.0
 
     colonne = []
+    piu_piena = max((len(t) for t in testi), default=0)
     for i, (x, etichetta, campo_intestazione) in enumerate(partenze):
         dal_contenuto = proponi_campo(testi[i])
+        quasi_vuota = len(testi[i]) < QUOTA_COLONNA_VUOTA * piu_piena  # didascalie sparse, non dati
+        if campo_intestazione is None and (quasi_vuota or allineamento_medio(i) < QUOTA_ALLINEAMENTO):
+            # nessun nome noto e testo non allineato: testo promozionale o marca (catalogo Etabeta)
+            dal_contenuto = "ignora"
         campo = campo_intestazione or dal_contenuto
         if dal_contenuto == "identificativo" and campo in ("modello", "codice"):
             campo = "identificativo"  # l'intestazione dice "Modello", ma ci sono anche codice ed EAN
         x1 = xs[i + 1] - 1 if i + 1 < len(xs) else larghezza
-        fine = fisiche[i].x1 if intest is None else None
+        fine = max([s.x1 for s in spans_col[i]] + ([fisiche[i].x1] if fisiche[i].x1 else []), default=None)
         colonne.append(ColonnaRilevata(x, x1, etichetta, campo, esempi[i], intest is not None, len(testi[i]), fine))
 
     ha_parentesi = any(c.campo_proposto in ("identificativo",) for c in colonne) or any(
@@ -225,6 +265,27 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
     parser.prepara(list(pagine.values()))
     analisi.ancora_proposta = parser.ancora
     return analisi
+
+
+QUOTA_ALLINEAMENTO = 0.5
+QUOTA_COLONNA_VUOTA = 0.1
+
+
+def allineamento(righe: list[Riga]) -> float:
+    """Quota delle righe di una colonna che cominciano, o finiscono, alla stessa x (entro 2 pt).
+
+    I dati di una tabella sono allineati a sinistra (codici, descrizioni) o a destra (prezzi); il testo
+    promozionale e le marche di un catalogo sono centrati, e qui danno valori bassi. Si misura sulle
+    righe e non sugli span: Â«Dimensioni BAP: 315x315Â» sono due span, e il secondo comincia ovunque.
+    """
+    if not righe:
+        return 0.0
+
+    def quota(valori):
+        moda = Counter(round(v) for v in valori).most_common(1)[0][0]
+        return sum(1 for v in valori if abs(v - moda) <= 2) / len(valori)
+
+    return max(quota([r.x0 for r in righe]), quota([r.x1 for r in righe]))
 
 
 def _righe_per_colonna(spans: list[Span], colonne: list[ColonnaFisica], tol: float):
@@ -257,12 +318,15 @@ def profilo_da_analisi(
         codici_tra_parentesi = analisi.regex_codice_proposta is not None
     colonne = []
     for col, campo in zip(analisi.colonne, campi, strict=True):
+        # si salva come intestazione solo un'etichetta che e' il nome di un campo: la marca o il titolo
+        # di una tabella valgono per quella tabella sola, e le altre si riconoscono per posizione
+        nome_di_campo = campo_da_intestazione(col.etichetta)[0] is not None
         voce = {
             "campo": campo,
-            "intestazioni": [col.etichetta] if col.da_intestazione else [],
+            "intestazioni": [col.etichetta] if col.da_intestazione and nome_di_campo else [],
             "x_relativo": round(col.x0 / analisi.larghezza, 4),
         }
-        if not col.da_intestazione and col.fine_testo is not None:
+        if col.fine_testo is not None:
             voce["x_fine_relativo"] = round(min(1.0, col.fine_testo / analisi.larghezza), 4)
         if campo == "identificativo":
             voce["contiene"] = list(CONTIENE_PREDEFINITO)

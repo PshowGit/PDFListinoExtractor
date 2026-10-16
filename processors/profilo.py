@@ -5,6 +5,7 @@ estrazione senza conversioni. `normalizza` lo completa con i valori predefiniti,
 non deve gestire chiavi mancanti.
 """
 import copy
+import functools
 import re
 import unicodedata
 
@@ -17,8 +18,9 @@ REGEX_CODICE_PARENTESI = r"^\((?P<valore>[^()]+)\)$"
 REGEX_EAN = r"^\d{8,14}$"
 
 # Sinonimi delle intestazioni, confrontati dopo `normalizza_testo`. Le voci piu' lunghe vincono
-# sulle piu' corte ("prezzo al pubblico" prima di "prezzo"). "listino" manca di proposito: e'
-# il titolo di quasi ogni documento, e diventerebbe una colonna Prezzo inesistente.
+# sulle piu' corte ("prezzo al pubblico" prima di "prezzo"). "listino" e' il titolo di quasi ogni
+# documento (JBL) ma anche l'etichetta della colonna prezzi (Etabeta): resta, perche' una riga e'
+# un'intestazione solo se riconosce almeno due colonne diverse, e un titolo da solo non basta.
 SINONIMI: dict[str, list[str]] = {
     "modello": ["modello", "model", "articolo", "art", "prodotto", "product", "nome", "name", "item", "tipo"],
     "codice": [
@@ -28,7 +30,7 @@ SINONIMI: dict[str, list[str]] = {
     "ean": ["ean", "ean13", "ean 13", "barcode", "codice a barre", "gtin", "upc"],
     "descrizione": ["descrizione", "description", "desc", "dettagli", "caratteristiche", "details"],
     "prezzo": [
-        "prezzo", "price", "prezzo listino", "listino prezzi", "prezzo al pubblico", "prezzo al", "importo",
+        "prezzo", "price", "listino", "prezzo listino", "listino prezzi", "prezzo al pubblico", "prezzo al", "importo",
         "list price", "msrp", "rrp", "prezzo netto", "netto", "euro", "eur", "€", "prezzo unitario", "unit price",
     ],
 }
@@ -51,6 +53,7 @@ PREDEFINITI = {
 }
 
 
+@functools.lru_cache(maxsize=65536)
 def normalizza_testo(testo: str) -> str:
     """Minuscolo, senza accenti, punteggiatura come spazio: "Cod. Art." -> "cod art"."""
     t = unicodedata.normalize("NFKD", testo).encode("ascii", "ignore").decode() if testo else ""
@@ -60,19 +63,34 @@ def normalizza_testo(testo: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
-def campo_da_intestazione(testo: str, sinonimi_extra: dict | None = None) -> tuple[str | None, int]:
-    """Campo riconosciuto in un'etichetta d'intestazione e lunghezza del sinonimo che l'ha riconosciuto."""
+@functools.lru_cache(maxsize=256)
+def _voci_normalizzate(extra: tuple) -> tuple[tuple[str, str], ...]:
+    """(campo, sinonimo normalizzato), calcolate una volta: si confrontano con ogni riga di ogni pagina,
+    e normalizzarle a ogni confronto quintuplicava il tempo di estrazione (misurato sul JBL: 1,0 -> 5,5 s)."""
+    aggiunte = dict(extra)
+    return tuple(
+        (campo, v)
+        for campo in CAMPI_DATI
+        for voce in (*SINONIMI[campo], *aggiunte.get(campo, ()))
+        if (v := normalizza_testo(voce))
+    )
+
+
+@functools.lru_cache(maxsize=65536)
+def _campo_da_intestazione(testo: str, extra: tuple) -> tuple[str | None, int]:
     t = normalizza_testo(testo)
-    if not t:
-        return None, 0
     migliore, lunghezza = None, 0
-    for campo in CAMPI_DATI:
-        voci = SINONIMI[campo] + list((sinonimi_extra or {}).get(campo, []))
-        for voce in voci:
-            v = normalizza_testo(voce)
-            if v and (t == v or t.startswith(v + " ")) and len(v) > lunghezza:
+    if t:
+        for campo, v in _voci_normalizzate(extra):
+            if (t == v or t.startswith(v + " ")) and len(v) > lunghezza:
                 migliore, lunghezza = campo, len(v)
     return migliore, lunghezza
+
+
+def campo_da_intestazione(testo: str, sinonimi_extra: dict | None = None) -> tuple[str | None, int]:
+    """Campo riconosciuto in un'etichetta d'intestazione e lunghezza del sinonimo che l'ha riconosciuto."""
+    extra = tuple(sorted((k, tuple(v)) for k, v in (sinonimi_extra or {}).items()))
+    return _campo_da_intestazione(testo, extra)
 
 
 def _fondi(base: dict, sopra: dict) -> dict:

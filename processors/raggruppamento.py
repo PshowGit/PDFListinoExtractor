@@ -64,6 +64,30 @@ def gruppi(righe: list[Riga], e_ancora: Callable[[Riga], bool], stacco: float, t
     return risultato
 
 
+def celle(righe: list[Riga], separatori: list[float], tagli: list[float]) -> list[Gruppo] | None:
+    """Articoli come celle di una griglia: le righe della colonna d'ancoraggio fra due linee divisorie.
+
+    Vale solo se le linee sono fitte, almeno una ogni due righe di quella colonna: allora la griglia
+    dice da sola dove finisce un articolo, e non serve che il modello abbia l'aspetto di un codice
+    (catalogo Etabeta, sezione ARX: «IsoLater», «Super Splitter Duo»). Con poche linee (JBL: le
+    sottolineature dell'intestazione) restituisce None e vale il raggruppamento per ancore.
+    """
+    if not righe or len(separatori) < max(3, 0.5 * len(righe)):
+        return None
+    bordi = sorted(set(separatori) | set(tagli))
+    gruppi_celle: dict[int, list[Riga]] = {}
+    for r in sorted(righe, key=lambda r: r.y0):
+        cella = sum(1 for b in bordi if b <= r.y0)
+        gruppi_celle.setdefault(cella, []).append(r)
+    risultato = []
+    for cella, v in sorted(gruppi_celle.items()):
+        g = Gruppo(v, v[0])
+        # la cella intera, perche' anche le altre colonne si dividano sulla stessa griglia
+        g.cella = (bordi[cella - 1] if cella > 0 else float("-inf"), bordi[cella] if cella < len(bordi) else float("inf"))
+        risultato.append(g)
+    return risultato
+
+
 def estensioni(inizi: list[float], tagli: list[float]) -> list[tuple[float, float]]:
     """Fascia verticale di ogni articolo: dal suo inizio al successivo, o al primo taglio che incontra."""
     out = []
@@ -73,6 +97,109 @@ def estensioni(inizi: list[float], tagli: list[float]) -> list[tuple[float, floa
         if dopo:
             fine = min(fine, min(dopo))
         out.append((inizio, fine))
+    return out
+
+
+def fasce(ys: list[float], inizi: list[float], tagli: list[float], tolleranza: float,
+          finestra: float, contiguo: float) -> list[tuple[float, float]]:
+    """Fasce verticali degli articoli per una colonna che non e' quella d'ancoraggio.
+
+    Il confine fra due articoli non e' l'inizio del secondo, ma il distacco piu' ampio fra le righe
+    di questa colonna, cercato fra il punto medio delle due ancore e poco dopo la seconda. Nel
+    catalogo Etabeta il codice sta a meta' altezza di una descrizione di 2-4 righe: le prime righe
+    cominciano fino a 15 pt sopra il codice e, col confine all'inizio, finivano nell'articolo
+    precedente. Dove la descrizione comincia insieme all'articolo (JBL) il distacco piu' ampio dopo il
+    punto medio e' proprio quello prima del secondo articolo: il risultato non cambia.
+    Il primo articolo risale finche' le righe sono attaccate (distacco fino a `contiguo`): nel JBL la
+    prosecuzione dalla pagina precedente sta a 14,5 pt dal primo articolo e resta fuori.
+    """
+    if not inizi:
+        return []
+    ys = sorted(ys)
+    inizio = inizi[0] - tolleranza
+    proprie = [y for y in ys if y >= inizio]
+    attuale = proprie[0] if proprie else inizi[0]
+    for y in reversed([y for y in ys if y < inizi[0] - tolleranza]):
+        if attuale - y > contiguo or any(y < t < attuale for t in tagli):
+            break
+        inizio, attuale = y, y
+    # fine del blocco di righe attaccate che comincia da ogni riga
+    fine_blocco = list(ys)
+    for i in range(len(ys) - 2, -1, -1):
+        if ys[i + 1] - ys[i] <= contiguo:
+            fine_blocco[i] = fine_blocco[i + 1]
+    out = []
+    for a, b in itertools.pairwise(inizi):
+        nel_mezzo = [t for t in tagli if a < t < b]
+        if nel_mezzo:
+            out.append((inizio, min(nel_mezzo)))
+            inizio = max(nel_mezzo)
+            continue
+        meta = (a + b) / 2
+        # un taglio vale solo se il blocco sotto di esso arriva all'ancora successiva: altrimenti
+        # quelle righe sono la coda del primo articolo, non la testa del secondo (JBL: un articolo
+        # senza descrizione si prendeva la fine di quella del precedente)
+        candidati = [
+            (ys[j + 1] - ys[j], ys[j + 1])
+            for j in range(len(ys) - 1)
+            if meta <= ys[j + 1] < b + finestra and ys[j] >= a - tolleranza and fine_blocco[j + 1] >= b - tolleranza
+        ]
+        confine = max(candidati)[1] if candidati else b - tolleranza
+        out.append((inizio, confine))
+        inizio = confine
+    dopo = [t for t in tagli if t > inizi[-1]]
+    out.append((inizio, min(dopo) if dopo else float("inf")))
+    return out
+
+
+def e_centrata(ys: list[float], inizi: list[float], tagli: list[float], tolleranza: float,
+               contiguo: float) -> bool:
+    """La colonna ha il testo centrato sull'ancora? Vero se almeno un quinto degli articoli ha righe
+    attaccate sopra il proprio inizio e piu' vicine a lui che all'articolo precedente.
+
+    Nel JBL la descrizione comincia insieme all'articolo; in una tabella a righe equidistanti la riga
+    sopra ogni codice e' quella dell'articolo prima, a meta' strada non ci arriva: nessuno dei due
+    casi conta. Nel catalogo Etabeta il codice sta a meta' della cella e la prima riga gli sta 5 pt sopra.
+    `inizi` sono gli inizi degli articoli, non le righe delle ancore: nel JBL il codice e' la seconda riga.
+    """
+    if len(inizi) < 2:
+        return False
+    sopra = 0
+    for k, s in enumerate(inizi):
+        meta = (inizi[k - 1] + s) / 2 if k > 0 else s - contiguo
+        if any(max(s - contiguo, meta) < y < s - tolleranza and not any(y < t < s for t in tagli) for y in ys):
+            sopra += 1
+    return sopra >= max(2, 0.2 * len(inizi))
+
+
+def fasce_centrate(ys: list[float], ancore: list[float], tagli: list[float], tolleranza: float,
+                   contiguo: float) -> list[tuple[float, float]]:
+    """Fasce per una colonna centrata sull'ancora: ogni cella e' simmetrica rispetto al suo codice.
+
+    Nel catalogo Etabeta le righe sono equidistanti (10-11 pt) anche fra un articolo e l'altro, quindi
+    non c'e' un distacco da cercare; il codice pero' sta a meta' della sua cella. Nota la cima della
+    cella (la prima riga non ancora presa), la fine e' 2·ancora − cima; la cella dopo comincia li'.
+    """
+    ys = sorted(ys)
+    out = []
+    i = 0
+    for k, s in enumerate(ancore):
+        prossima = ancore[k + 1] if k + 1 < len(ancore) else float("inf")
+        limite_taglio = min([t for t in tagli if t > s], default=float("inf"))
+        if k == 0:  # la prima cella risale finche' le righe sono attaccate
+            proprie = [y for y in ys if y >= s - tolleranza]
+            attuale = proprie[0] if proprie else s
+            for y in reversed([y for y in ys if y < s - tolleranza]):
+                if attuale - y > contiguo or any(y < t < attuale for t in tagli):
+                    break
+                attuale = y
+            i = next((n for n, y in enumerate(ys) if y >= attuale), len(ys))
+        cima = ys[i] if i < len(ys) and ys[i] <= s + tolleranza else s
+        fine = min(2 * s - cima + tolleranza, prossima - tolleranza, limite_taglio)
+        fine = max(fine, s + tolleranza)  # una cella contiene almeno la riga della sua ancora
+        out.append((min(cima, s) - 0.01, fine))
+        while i < len(ys) and ys[i] < fine:
+            i += 1
     return out
 
 

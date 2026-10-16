@@ -35,9 +35,15 @@ def test_sinonimi_delle_intestazioni(etichetta, campo):
     assert campo_da_intestazione(etichetta)[0] == campo
 
 
-def test_listino_non_e_una_colonna_prezzo():
-    # e' il titolo di quasi ogni documento: riconoscerlo creerebbe una colonna inesistente
-    assert campo_da_intestazione("Listino")[0] is None
+def test_listino_e_un_prezzo_ma_un_titolo_da_solo_non_e_un_intestazione(regole):
+    # Etabeta chiama "Listino" la colonna prezzi; nel JBL "Listino" e' il titolo, accanto a "Gennaio 2026".
+    # Il titolo non diventa un'intestazione perche' riconosce una colonna sola.
+    from extractors.table_extractor import Metriche, Riga, rileva_intestazioni
+    from processors.models import Span
+
+    assert campo_da_intestazione("Listino")[0] == "prezzo"
+    titolo = Riga([Span("Listino", 32, 17, 78, 33, 16, 1), Span("Gennaio 2026", 487, 17, 562, 30, 12, 1)])
+    assert rileva_intestazioni([titolo], regole, Metriche(7, 10.5), 595) == []
 
 
 def test_sinonimi_aggiuntivi_del_fornitore():

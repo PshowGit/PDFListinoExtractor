@@ -195,7 +195,7 @@ di testo con posizione e corpo del carattere.
 ## Test
 
 ```powershell
-uv run pytest -q          # 125 test; quello OCR si salta se Tesseract non è installato
+uv run pytest -q          # 153 test; quello OCR si salta se Tesseract non è installato
 uv run ruff check .
 ```
 

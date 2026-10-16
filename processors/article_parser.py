@@ -16,12 +16,13 @@ from extractors.table_extractor import (
     ColonnaFisica,
     Metriche,
     Riga,
+    allinea_al_contenuto,
     colonna_di,
     e_ripetuta,
     firme_ripetute,
     metriche,
     raggruppa_righe,
-    rileva_intestazione,
+    rileva_intestazioni,
     risolvi_colonne,
 )
 from processors import raggruppamento
@@ -33,6 +34,18 @@ from processors.profilo import CAMPI_ANCORA, CONTIENE_PREDEFINITO, normalizza
 _SPAZI = re.compile(r"\s+")
 # il campo d'ancoraggio deve coprire almeno questa quota delle righe del campo piu' denso
 QUOTA_DENSITA_ANCORA = 0.6
+# se almeno questa quota delle righe della colonna Modello ha l'aspetto di un codice, l'ancora
+# accetta solo quelle: le altre sono testo che passa di li' (pagine descrittive, indice)
+QUOTA_ASPETTO_CODICE = 0.7
+_TOKEN_CODICE = re.compile(r"^(?=.*\d)[\w./+\-]+$|^[A-Z][A-Z0-9./+\-]{2,}$")
+
+
+def aspetto_codice(testo: str) -> bool:
+    """Un identificativo come lo scrivono i listini: al piu' tre parole, la prima con una cifra o
+    tutta maiuscola (DCP-1000, TU-NE1, Decoair-350L, TRIPOD-GA). Non lo sono «esaurimento» o
+    «6 ingressi di linea stereo con», righe di testo descrittivo cadute nella colonna Articolo."""
+    parole = testo.split()
+    return 0 < len(parole) <= 3 and len(testo) <= 40 and bool(_TOKEN_CODICE.match(parole[0]))
 
 
 def unisci_righe(testi: list[str]) -> str:
@@ -95,7 +108,21 @@ class ParserListino:
         tabelle = [self._tabella(s, w, h) for s, w, h in pagine]
         if self.ancora is None:
             self.ancora = self._ancora_per_densita(tabelle)
+        self.solo_codici = self._modelli_sono_codici(tabelle)
         self.passo_ancora = self._passo(tabelle)
+
+    def _modelli_sono_codici(self, tabelle: list[_Tabella]) -> bool:
+        """Vero se il documento scrive i modelli come codici: allora una riga che non lo sembra non e'
+        un articolo. Sul catalogo Etabeta l'87% dei valori e' una parola sola come DCP-1000; un listino
+        che scrive i modelli per esteso non supera la soglia e non viene filtrato."""
+        if self.ancora != "modello":
+            return False
+        testi = []
+        for t in tabelle:
+            n = self._colonna_del_campo(t, "modello")
+            if n is not None and self._profilo_colonna(t.colonne[n])["campo"] == "modello":
+                testi += [_pulito(r.testo) for r in t.righe.get(n, []) if _pulito(r.testo)]
+        return bool(testi) and sum(map(aspetto_codice, testi)) >= QUOTA_ASPETTO_CODICE * len(testi)
 
     def _assicura_preparato(self, spans, larghezza, altezza) -> None:
         if self.metr is None:  # chiamato su una pagina sola, senza preparazione: si usa quella pagina
@@ -129,28 +156,41 @@ class ParserListino:
     def _tabella(self, spans: list[Span], larghezza: float, altezza: float) -> _Tabella:
         tol = self.metr.tolleranza_riga
         righe_pagina = raggruppa_righe(spans, tol)
-        intestazione = rileva_intestazione(righe_pagina, self.p, self.metr)
-        colonne = risolvi_colonne(intestazione, self.p, larghezza)
+        # un catalogo ha un'intestazione per tabella, piu' tabelle per pagina: le colonne si leggono
+        # dalla prima, tutte si tolgono dal corpo e fanno da taglio fra un articolo e l'altro
+        intestazioni = rileva_intestazioni(righe_pagina, self.p, self.metr, larghezza)
+        colonne = risolvi_colonne(intestazioni[0] if intestazioni else None, self.p, larghezza)
         corpo: list[Span] = []
         for riga in righe_pagina:
-            if intestazione is not None and riga.y0 <= intestazione.y1:
-                continue  # intestazione e tutto cio' che le sta sopra
+            # si tolgono le righe d'intestazione, non cio' che sta sopra la prima: nel catalogo Etabeta
+            # una tabella prosegue dalla pagina precedente senza intestazione e la prima compare piu' in
+            # basso. Testata e titolo del documento sopra l'intestazione (JBL) li toglie la ripetizione.
+            if any(i.y0 - tol <= riga.y0 <= i.y1 for i in intestazioni):
+                continue
             if e_ripetuta(riga, altezza, self.firme) or any(r.search(riga.testo) for r in self.re_escludi):
                 continue
             corpo.extend(s for s in riga.spans if not any(r.search(s.testo) for r in self.re_escludi))
+        if intestazioni:
+            colonne = allinea_al_contenuto(colonne, corpo, self.p["spaziatura"]["tolleranza_colonna_pt"],
+                                           profilo=self.p, larghezza=larghezza)
         per_colonna: dict[int, list[Span]] = {}
         titoli: list[Span] = []
         for s in corpo:
             dove = colonna_di(s, colonne, self.p, self.metr)
             if dove == TITOLO:
                 titoli.append(s)
-            elif dove != ESTERNO and colonne[dove].indice is not None:
+            elif (dove != ESTERNO and colonne[dove].indice is not None
+                  and self.p["colonne"][colonne[dove].indice]["campo"] != "ignora"):
+                # le colonne da ignorare (la marca e il testo promozionale di un catalogo) restano
+                # confini, ma il loro testo non entra in nessun campo
                 per_colonna.setdefault(dove, []).append(s)
-        return _Tabella(
+        t = _Tabella(
             colonne,
             {n: raggruppa_righe(v, tol) for n, v in per_colonna.items()},
             raggruppa_righe(titoli, tol),
         )
+        t.intestazioni = intestazioni
+        return t
 
     def _profilo_colonna(self, col: ColonnaFisica) -> dict:
         return self.p["colonne"][col.indice]
@@ -180,6 +220,8 @@ class ParserListino:
         # che non e' ne' un codice ne' un EAN
         if composita:
             return bool(testo) and not self._e_ancora(riga, "codice", col) and not self._e_ancora(riga, "ean", col)
+        if getattr(self, "solo_codici", False):
+            return aspetto_codice(testo)
         return bool(testo)
 
     def elabora_pagina(
@@ -194,42 +236,91 @@ class ParserListino:
         t = self._tabella(spans, larghezza, altezza)
         tol = self.metr.tolleranza_riga
         n_ancora = self._colonna_del_campo(t, self.ancora)
-        tagli = sorted([r.y0 for r in t.titoli] + list(separatori))
+        intest = getattr(t, "intestazioni", [])
+        # una linea divisoria e' il bordo superiore di una cella, e il riquadro del testo dentro la cella
+        # la sfiora da sopra (Etabeta: linea a 59,7, testo da 59,5): taglia quindi una tolleranza piu' in alto,
+        # o la prima riga di ogni cella finisce nella cella precedente
+        tagli = sorted([r.y0 for r in t.titoli] + [y - tol for y in separatori] + [i.y0 for i in intest])
+        # categoria: titoli di sezione e, nei cataloghi, marca e titolo scritti nell'intestazione della tabella
+        categorie = sorted([(r.y0, r.testo) for r in t.titoli]
+                           + [(i.y0, " · ".join(i.variabili)) for i in intest if i.variabili])
         gruppi = []
         if n_ancora is not None:
             col = t.colonne[n_ancora]
-            gruppi = raggruppamento.gruppi(
+            composita = self._profilo_colonna(col)["campo"] == "identificativo"
+            celle = None
+            if separatori and not composita:
+                # griglia fitta: ogni cella e' un articolo, qualunque aspetto abbia il modello
+                righe_ancora = [r for r in t.righe.get(n_ancora, []) if _pulito(r.testo)]
+                celle = raggruppamento.celle(righe_ancora, [y - tol for y in separatori],
+                                             [r.y0 for r in t.titoli] + [i.y0 for i in intest[1:]])
+                if celle is not None:
+                    # una cella e' un articolo se ha un prezzo o un modello con l'aspetto di un codice:
+                    # le altre sono testo promozionale caduto nella griglia («Honeywell e' la soluzione...»)
+                    n_prezzo = self._colonna_del_campo(t, "prezzo")
+                    prezzi_y = [r.y0 for r in t.righe.get(n_prezzo, [])] if n_prezzo is not None else []
+                    celle = [g for g in celle if aspetto_codice(_pulito(g.righe[0].testo))
+                             or any(g.cella[0] <= y < g.cella[1] for y in prezzi_y)]
+            gruppi = celle if celle is not None else raggruppamento.gruppi(
                 t.righe.get(n_ancora, []),
                 lambda r: self._e_ancora(r, self.ancora, col),
                 self.p["spaziatura"]["fattore_stacco"] * self.passo_ancora,
                 tagli,
             )
         inizi = [g.inizio for g in gruppi]
-        self._prosecuzione(t, inizi[0] if inizi else float("inf"), pagina, tol)
+        finestra = 0.6 * self.passo_ancora
+        # righe di ogni colonna divise fra gli articoli; quelle prima del primo sono una prosecuzione
+        prima: dict[int, list[Riga]] = {}
+        per_articolo: list[dict[int, list[Riga]]] = [{} for _ in gruppi]
+        for n, righe in t.righe.items():
+            if n == n_ancora:
+                dentro = {id(r) for g in gruppi for r in g.righe}
+                for k, g in enumerate(gruppi):
+                    per_articolo[k][n] = list(g.righe)
+                fasce = raggruppamento.estensioni(inizi, tagli)
+                resto = [r for r in righe if id(r) not in dentro]
+            elif gruppi and getattr(gruppi[0], "cella", None) is not None:
+                # griglia: le altre colonne si dividono sulle stesse celle dell'ancora
+                fasce = [g.cella for g in gruppi]
+                resto = righe
+            else:
+                ys = sorted(r.y0 for r in righe)
+                contiguo = 1.2 * self.metr.interlinea
+                ancore_y = [g.ancora.y0 for g in gruppi]
+                if raggruppamento.e_centrata(ys, inizi, tagli, tol, contiguo):
+                    fasce = raggruppamento.fasce_centrate(ys, ancore_y, tagli, tol, contiguo)
+                else:
+                    fasce = raggruppamento.fasce(ys, inizi, tagli, tol, finestra, contiguo)
+                resto = righe
+            for r in resto:
+                k = next((k for k, (lo, hi) in enumerate(fasce) if lo - (tol if n == n_ancora else 0) <= r.y0
+                          < hi - (tol if n == n_ancora else 0)), None)
+                if k is not None:
+                    per_articolo[k].setdefault(n, []).append(r)
+                elif not inizi or r.y0 < inizi[0]:
+                    prima.setdefault(n, []).append(r)
+        self._prosecuzione(t, prima, pagina, categorie)
 
         articoli = []
-        for fascia in raggruppamento.estensioni(inizi, tagli):
-            sopra = [ti for ti in t.titoli if ti.y0 < fascia[0]]
+        for k, inizio in enumerate(inizi):
+            sopra = [testo for y, testo in categorie if y < inizio]
             if sopra:
-                self.categoria = sopra[-1].testo
-            per_colonna = {
-                n: [r for r in righe if raggruppamento.nella_fascia(r, fascia, tol)] for n, righe in t.righe.items()
-            }
+                self.categoria = sopra[-1]
+            per_colonna = {n: sorted(v, key=lambda r: r.y0) for n, v in per_articolo[k].items()}
             art = self._articolo(t, per_colonna, pagina)
             articoli.append(art)
             self.ultimo = art
-        if not gruppi and t.titoli:
-            self.categoria = t.titoli[-1].testo
+        if not gruppi and categorie:
+            self.categoria = categorie[-1][1]
         return articoli
 
-    def _prosecuzione(self, t: _Tabella, inizio_primo: float, pagina: int, tol: float) -> None:
+    def _prosecuzione(self, t: _Tabella, prima: dict[int, list[Riga]], pagina: int, categorie) -> None:
         """Testo in cima alla pagina, prima del primo articolo: e' il seguito dell'ultimo articolo."""
-        prima = {n: [r for r in righe if r.y0 < inizio_primo - tol] for n, righe in t.righe.items()}
         prima = {n: righe for n, righe in prima.items() if righe}
         if not prima:
             return
         primo_y = min(r.y0 for righe in prima.values() for r in righe)
-        if self.ultimo is None or any(ti.y0 < primo_y for ti in t.titoli):
+        if self.ultimo is None or any(y < primo_y for y, _ in categorie):
             testo = unisci_righe([r.testo for righe in prima.values() for r in righe])
             self.avvisi.append(f"Pagina {pagina}: testo non attribuito a nessun articolo: «{testo[:80]}»")
             return
@@ -362,6 +453,17 @@ class ParserListino:
         return parse_prezzo(testo, self.p["formato_prezzo"])
 
     def _assegna_prezzo(self, art: Articolo, righe: list[Riga], col: ColonnaFisica) -> None:
+        if len(righe) > 1:
+            validi = [r for r in righe if self._prezzo_da_testo(r.testo).valore is not None]
+            if not validi:
+                # "Chiedere / quotazioni" su due righe: e' un testo solo, non due prezzi
+                art.prezzo_testo = unisci_righe([r.testo for r in righe])
+                art.note_estrazione["prezzo"] = (
+                    f"Prezzo non riconosciuto: «{art.prezzo_testo}» (colonna «{col.etichetta}»)"
+                )
+                return
+            if len(validi) == 1:
+                righe = validi
         if len(righe) > 1:
             art.prezzo_testo = " | ".join(r.testo for r in righe)
             art.note_estrazione["prezzo"] = (
