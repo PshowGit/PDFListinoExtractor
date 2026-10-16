@@ -35,5 +35,9 @@ AGGIORNAMENTO
  Eseguire il nuovo PDFListinoExtractor_Setup.exe: sostituisce la versione installata mantenendo
  cartella, collegamenti e dati personali.
 
+LICENZA E SORGENTE
+ Software libero con licenza GNU AGPL v3 o successive (LICENZA.txt). Il codice sorgente e' su
+ https://github.com/PshowGit/PDFListinoExtractor
+
 DISINSTALLAZIONE
  Impostazioni -> App -> PDFListinoExtractor -> Disinstalla.

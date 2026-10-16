@@ -64,4 +64,4 @@ Scelte non ovvie, ognuna motivata da una misura o da un difetto reale:
 
 ## Licenze
 
-PyMuPDF è **AGPL-3.0**. Il repository `PshowGit/PDFListinoExtractor` è pubblico, ma non ha ancora un file di licenza del programma. L'elenco dei componenti di terze parti è in `installer/LICENZE_TERZE_PARTI.txt`.
+Il programma è **AGPL-3.0-or-later** (`LICENSE`, testo ufficiale preso da `gh api licenses/agpl-3.0`), perché PyMuPDF è AGPL. Il repository `PshowGit/PDFListinoExtractor` è pubblico ed è la fonte del sorgente a cui rimanda l'installer: una dipendenza nuova deve avere una licenza compatibile e va aggiunta a `installer/LICENZE_TERZE_PARTI.txt`.

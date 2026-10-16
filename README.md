@@ -87,11 +87,12 @@ estrae, esporta e scrive accanto all'Excel un report `.collaudo.json` e uno scre
 di installazione, aggiornamento e disinstallazione è `tools\collaudo_installer.ps1` (v.
 [docs/report-test-distribuzione.md](docs/report-test-distribuzione.md)).
 
-**Licenze.** Tutte le dipendenze sono permissive, salvo **PyMuPDF, che è AGPL-3.0** (o licenza commerciale
-Artifex). Per l'uso interno non ci sono obblighi aggiuntivi. Distribuire il programma *fuori*
-dall'organizzazione obbliga a rendere disponibile il sorgente, oppure richiede la licenza commerciale. Elenco
-completo in `installer\LICENZE_TERZE_PARTI.txt`, installato insieme al programma. Tesseract non è incluso:
-il listino JBL è testuale e non ne ha bisogno.
+**Licenze.** Il programma è distribuito con licenza **GNU Affero General Public License v3.0 o successive**
+([LICENSE](LICENSE)), la stessa di PyMuPDF, su cui si basa. Chi distribuisce l'eseguibile deve rendere
+disponibile il sorgente alle stesse condizioni: è questo repository,
+https://github.com/PshowGit/PDFListinoExtractor. Le altre dipendenze hanno licenze permissive (MIT, BSD,
+Apache 2.0, PSF); l'elenco completo è in `installer\LICENZE_TERZE_PARTI.txt`, installato col programma insieme
+alla licenza. Tesseract non è incluso: il listino JBL è testuale e non ne ha bisogno.
 
 ## Installazione per lo sviluppo
 

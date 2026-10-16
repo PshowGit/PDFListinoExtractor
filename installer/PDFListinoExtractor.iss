@@ -46,8 +46,8 @@ SolidCompression=yes
 ; se il programma e' aperto durante un aggiornamento, l'installer propone di chiuderlo
 CloseApplications=yes
 RestartApplications=no
-; nessuna pagina di licenza: non e' stata predisposta una licenza del programma.
-; Le licenze dei componenti di terze parti sono installate in LICENZE_TERZE_PARTI.txt.
+; Licenza AGPL-3.0-or-later, installata in LICENZA.txt. Nessuna pagina di accettazione: l'AGPL, come
+; la GPL, non va accettata per usare il programma (sezione 9), solo per modificarlo o distribuirlo.
 
 [Languages]
 Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl"
@@ -64,6 +64,7 @@ Type: filesandordirs; Name: "{app}\_internal"
 Source: "..\dist\{#NomeApp}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "LEGGIMI.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LICENZE_TERZE_PARTI.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENZA.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#NomeApp}"; Filename: "{app}\{#Eseguibile}"; Comment: "{#TitoloApp}"

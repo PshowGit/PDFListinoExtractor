@@ -1,5 +1,9 @@
-PDFListinoExtractor - Componenti di terze parti inclusi nel programma
-=====================================================================
+PDFListinoExtractor - Licenza e componenti di terze parti
+========================================================
+
+PDFListinoExtractor e' software libero, distribuito con licenza GNU Affero General Public License
+versione 3 o successive (testo completo in LICENZA.txt). Il codice sorgente e' disponibile su
+https://github.com/PshowGit/PDFListinoExtractor
 
 Il programma include i seguenti componenti, ciascuno con la propria licenza:
 
@@ -19,9 +23,8 @@ Il programma include i seguenti componenti, ciascuno con la propria licenza:
                            impacchettati con qualunque licenza
 
 NOTA SU PyMuPDF (AGPL 3.0)
-La licenza AGPL richiede che chi distribuisce il programma a terzi renda disponibile il codice
-sorgente completo dell'applicazione alle stesse condizioni, a meno di disporre di una licenza
-commerciale Artifex. L'uso interno non costituisce distribuzione a terzi; prima di distribuire
-il programma fuori dall'organizzazione occorre valutare questo vincolo.
+PyMuPDF e' il motivo per cui l'intero programma e' AGPL: chi lo distribuisce deve rendere disponibile
+il codice sorgente completo alle stesse condizioni. Il sorgente e' pubblico all'indirizzo indicato
+sopra; una versione modificata va resa disponibile allo stesso modo.
 
 Tesseract OCR NON e' incluso: si installa a parte solo se servono i PDF scansionati.
