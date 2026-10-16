@@ -1,0 +1,34 @@
+PDFListinoExtractor - Estrattore listini PDF
+============================================
+
+Legge un listino prezzi PDF e lo salva in Excel con le colonne
+Modello | Codice | EAN | Descrizione | Prezzo.
+
+USO
+ 1. Seleziona PDF: scegliere il listino.
+ 2. Estrai articoli: la finestra resta utilizzabile durante il lavoro; si puo' annullare.
+ 3. Anteprima: le righe da verificare sono evidenziate in arancione. Doppio clic su una cella per
+    correggerla, tasto Canc per eliminare le righe selezionate, clic sull'intestazione per ordinare,
+    "Mostra pagina PDF" per vedere da dove viene un articolo.
+ 4. Esporta in Excel: si sceglie dove salvare. Il PDF originale non viene mai modificato.
+
+DOVE SALVA I SUOI DATI
+ %LOCALAPPDATA%\PDFListinoExtractor\logs\app.log     registro degli errori
+ %LOCALAPPDATA%\PDFListinoExtractor\supplier_rules.json
+      facoltativo: regole personali per altri fornitori, che si aggiungono a quelle incluse.
+ Questi file e gli Excel esportati restano anche dopo aggiornamento o disinstallazione.
+
+PDF SCANSIONATI
+ Servono a Tesseract OCR (https://github.com/UB-Mannheim/tesseract/wiki), installato nel percorso
+ predefinito con la lingua italiana. Senza, il programma lo segnala e legge solo i PDF testuali.
+
+AVVISO ANTIVIRUS
+ Il programma non e' firmato digitalmente. Windows SmartScreen o l'antivirus possono mostrare un
+ avviso al primo avvio dell'installer: "Ulteriori informazioni" -> "Esegui comunque".
+
+AGGIORNAMENTO
+ Eseguire il nuovo PDFListinoExtractor_Setup.exe: sostituisce la versione installata mantenendo
+ cartella, collegamenti e dati personali.
+
+DISINSTALLAZIONE
+ Impostazioni -> App -> PDFListinoExtractor -> Disinstalla.

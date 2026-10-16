@@ -1,0 +1,52 @@
+{
+  "predefinito": "jbl_exhibo",
+  "fornitori": {
+    "jbl_exhibo": {
+      "nome": "JBL (Exhibo) - Listino al pubblico",
+      "intestazioni": {
+        "modello": "Modello",
+        "descrizione": "Descrizione",
+        "prezzo": "Prezzo al"
+      },
+      "colonne_predefinite": {
+        "modello_x": 102.0,
+        "descrizione_x": 202.0,
+        "prezzo_x": 467.0
+      },
+      "tolleranza_colonna": 6.0,
+      "area": {
+        "y_min": 160.0,
+        "y_max": 780.0
+      },
+      "piede_pagina": [
+        "^Pagina \\d+ di \\d+$",
+        "^Exhibo S\\.p\\.A\\.",
+        "^Tel\\. 039"
+      ],
+      "testi_intestazione": [
+        "^Listino$",
+        "^Gennaio \\d{4}$",
+        "^Sostituisce e annulla i precedenti$",
+        "^Prezzi in Euro",
+        "^Modello$",
+        "^Descrizione$",
+        "^Prezzo al$",
+        "^Pubblico$"
+      ],
+      "soglia_titolo": 10.0,
+      "distanza_blocco": 14.0,
+      "tolleranza_riga": 2.5,
+      "regex_codice": "^\\((?P<codice>[^()]+)\\)$",
+      "codice_con_parentesi": true,
+      "descrizione_vuota_usa_modello": true,
+      "formato_prezzo": "it",
+      "prezzo_massimo": 1000000,
+      "ocr": {
+        "caratteri_minimi_pagina": 20,
+        "dpi": 300,
+        "lingua": "ita+eng",
+        "confidenza_minima": 70
+      }
+    }
+  }
+}

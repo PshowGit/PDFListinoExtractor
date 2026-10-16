@@ -1,0 +1,30 @@
+[project]
+name = "pdf-listino-extractor"
+version = "1.0.0"
+description = "Estrazione di listini prezzi PDF in Excel (Modello, Codice, EAN, Descrizione, Prezzo)"
+requires-python = ">=3.12"
+dependencies = [
+    "customtkinter>=6.0.0",
+    "openpyxl>=3.1.5",
+    "pillow>=12.3.0",
+    "pymupdf>=1.28.2",
+    "pytesseract>=0.3.13",
+]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.22.3",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# BLE001: le catture generiche sono volute (una pagina rotta non deve far perdere le altre,
+# e l'interfaccia deve sopravvivere a qualunque errore); E402: sys.path prima degli import
+ignore = ["BLE001", "E402"]

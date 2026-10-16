@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv
+
+# Log dell'applicazione
+logs/
+
+# Listini dei fornitori: materiale commerciale, non va nel repository.
+# Il PDF sintetico dei test si rigenera con `uv run python -m tests.sintetico`.
+samples/*
+!samples/listino_sintetico.pdf
+
+# File prodotti
+*.xlsx

@@ -1,0 +1,25 @@
+PDFListinoExtractor - Componenti di terze parti inclusi nel programma
+=====================================================================
+
+Il programma include i seguenti componenti, ciascuno con la propria licenza:
+
+  PyMuPDF / MuPDF 1.28.2   GNU Affero GPL 3.0, oppure licenza commerciale Artifex
+                           https://pymupdf.readthedocs.io  -  https://artifex.com/licensing
+  customtkinter 6.0.0      MIT (dichiarata anche CC0 1.0)  https://github.com/TomSchimansky/CustomTkinter
+  openpyxl 3.1.5           MIT                              https://foss.heptapod.net/openpyxl/openpyxl
+  et-xmlfile 2.0.0         MIT
+  Pillow 12.3.0            MIT-CMU (HPND)                   https://python-pillow.github.io
+  pytesseract 0.3.13       Apache 2.0                       https://github.com/madmaze/pytesseract
+  darkdetect 0.8.0         BSD 3-Clause
+  packaging 26.3           Apache 2.0 oppure BSD 2-Clause
+  Python 3.12 e Tcl/Tk     Python Software Foundation License; licenza BSD di Tcl/Tk
+  PyInstaller (bootloader) GPL 2.0 con eccezione che consente la distribuzione di programmi
+                           impacchettati con qualunque licenza
+
+NOTA SU PyMuPDF (AGPL 3.0)
+La licenza AGPL richiede che chi distribuisce il programma a terzi renda disponibile il codice
+sorgente completo dell'applicazione alle stesse condizioni, a meno di disporre di una licenza
+commerciale Artifex. L'uso interno non costituisce distribuzione a terzi; prima di distribuire
+il programma fuori dall'organizzazione occorre valutare questo vincolo.
+
+Tesseract OCR NON e' incluso: si installa a parte solo se servono i PDF scansionati.

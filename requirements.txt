@@ -1,0 +1,10 @@
+# Dipendenze dell'applicazione (con uv bastano `uv sync`; questo file serve a chi usa pip)
+customtkinter==6.0.0
+openpyxl==3.1.5
+pillow==12.3.0
+pymupdf==1.28.2
+pytesseract==0.3.13   # facoltativo: serve solo per i PDF scansionati, insieme a Tesseract-OCR
+
+# Sviluppo
+pytest==9.1.1
+ruff==0.17.1
