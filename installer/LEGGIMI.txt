@@ -12,10 +12,15 @@ USO
     "Mostra pagina PDF" per vedere da dove viene un articolo.
  4. Esporta in Excel: si sceglie dove salvare. Il PDF originale non viene mai modificato.
 
+UN FORNITORE NUOVO
+ "Configura nuovo fornitore..." apre il wizard: si apre il listino, il programma riconosce le colonne e
+ le colora sulla pagina, si sceglie per ogni colonna il campo (Modello, Codice, EAN, Descrizione, Prezzo),
+ si prova con "Anteprima pagina" e si salva. Il fornitore compare subito nel menu Fornitore.
+
 DOVE SALVA I SUOI DATI
  %LOCALAPPDATA%\PDFListinoExtractor\logs\app.log     registro degli errori
  %LOCALAPPDATA%\PDFListinoExtractor\supplier_rules.json
-      facoltativo: regole personali per altri fornitori, che si aggiungono a quelle incluse.
+      i fornitori configurati col wizard (con una copia .bak della versione precedente).
  Questi file e gli Excel esportati restano anche dopo aggiornamento o disinstallazione.
 
 PDF SCANSIONATI

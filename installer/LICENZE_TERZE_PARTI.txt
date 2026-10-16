@@ -11,6 +11,8 @@ Il programma include i seguenti componenti, ciascuno con la propria licenza:
   Pillow 12.3.0            MIT-CMU (HPND)                   https://python-pillow.github.io
   pytesseract 0.3.13       Apache 2.0                       https://github.com/madmaze/pytesseract
   darkdetect 0.8.0         BSD 3-Clause
+  jsonschema 4.26.0        MIT  (con jsonschema-specifications, referencing, rpds-py, attrs: MIT;
+                           typing-extensions: PSF 2.0)
   packaging 26.3           Apache 2.0 oppure BSD 2-Clause
   Python 3.12 e Tcl/Tk     Python Software Foundation License; licenza BSD di Tcl/Tk
   PyInstaller (bootloader) GPL 2.0 con eccezione che consente la distribuzione di programmi

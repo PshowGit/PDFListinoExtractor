@@ -1,9 +1,10 @@
 # Estrattore listini PDF → Excel
 
 Applicazione desktop (Python, customtkinter) che legge un listino prezzi PDF, ne estrae gli articoli
-e li salva in un file Excel pronto all'uso. È ottimizzata per il **listino JBL distribuito da Exhibo**
-(«Listino Gennaio 2026 — Prezzi al pubblico»), ma le regole di lettura stanno in un file di
-configurazione e si possono adattare ad altri fornitori.
+e li salva in un file Excel pronto all'uso. Il motore non contiene coordinate fisse: ricava colonne,
+righe e articoli dalla geometria di ogni documento. Un fornitore nuovo si configura dal **wizard**,
+senza toccare file. Il profilo incluso è quello del **listino JBL distribuito da Exhibo** («Listino
+Gennaio 2026 — Prezzi al pubblico»).
 
 ## Cosa produce
 
@@ -46,9 +47,10 @@ Aggiornamento e disinstallazione **non toccano i dati dell'utente**:
 | Regole personali (facoltative) | `%LOCALAPPDATA%\PDFListinoExtractor\supplier_rules.json` |
 | File Excel esportati | dove li ha salvati l'utente |
 
-Il file di regole personali ha la stessa forma di `config/supplier_rules.json`. I fornitori che contiene si
-aggiungono a quelli inclusi nel programma, o li sostituiscono se hanno la stessa chiave. Se il file è
-illeggibile il programma lo segnala e parte con le regole incluse.
+Il file di regole personali lo scrive il wizard, nel formato di `config/supplier_rules.json` (schema
+versione 2; un file della versione 1.0 si legge ancora e si converte al primo salvataggio). I fornitori che
+contiene si aggiungono a quelli inclusi nel programma, o li sostituiscono se hanno la stessa chiave. Se il
+file è illeggibile il programma lo segnala e parte con le regole incluse.
 
 ## Compilare eseguibile e installer
 
@@ -129,20 +131,52 @@ uv run python main.py
 Il PDF originale viene solo letto, mai modificato. Gli errori tecnici finiscono in `logs/app.log` quando si
 lavora dal sorgente, in `%LOCALAPPDATA%\PDFListinoExtractor\logs\app.log` nel programma installato.
 
-## Come legge il listino JBL/Exhibo
+## Configurare un nuovo fornitore (wizard)
 
-Regole ricavate dal listino di gennaio 2026 (121 pagine, 673 articoli):
+Nella finestra principale: **Configura nuovo fornitore…**
 
-- PDF testuale, tre colonne a coordinate fisse. Le posizioni si leggono a ogni pagina dall'intestazione
-  «Modello / Descrizione / Prezzo al Pubblico»; se l'intestazione manca si usano quelle della configurazione.
-- Intestazione ripetuta (y < ~160), piè di pagina Exhibo e «Pagina N di 121» (y > 780) vengono scartati.
-- I titoli di categoria (corpo ≥ 10, es. «Amplificatori») chiudono l'articolo precedente e non entrano nei dati.
-- Un articolo è un **blocco di righe ravvicinate nella colonna Modello**: nome (una o più righe), codice tra
-  parentesi, EAN facoltativo. L'articolo si individua da qui e non dal prezzo: se un prezzo mancasse,
-  l'articolo verrebbe segnalato invece di fondersi con il successivo.
+1. **Apri PDF…** e scegli una pagina rappresentativa (◀ ▶). La pre-analisi, eseguita in un processo separato,
+   trova la riga d'intestazione e le colonne e le evidenzia sulla pagina, un colore per campo. Riconosce le
+   intestazioni per sinonimi: «SKU», «Part Number», «Cod. art.» valgono come Codice. Se l'intestazione manca,
+   ricostruisce le colonne dalla posizione del testo, con i prezzi allineati a destra trattati a parte.
+2. Per ogni colonna il menu propone un campo, dedotto da intestazione e contenuto: Modello, Codice, EAN,
+   Descrizione, Prezzo, *Modello + Codice + EAN impilati* nella stessa colonna (come nel listino JBL), oppure
+   *ignora*. Un clic su una colonna della pagina evidenzia il suo menu.
+3. **Ancora**: il campo su cui si individua ogni articolo. «Automatica» sceglie il campo identificativo più
+   denso, nell'ordine codice, EAN, modello, prezzo. Il prezzo viene per ultimo di proposito: se l'ancora fosse
+   il prezzo, un articolo senza prezzo si fonderebbe con quello sopra.
+4. Formato dei prezzi, codici tra parentesi (nel PDF ed eventualmente nell'Excel), linee orizzontali come
+   separatori, nome del fornitore.
+5. **Anteprima pagina** estrae solo quella pagina e mostra la tabella con le anomalie. **Salva fornitore** lo
+   aggiunge al menu «Fornitore» della finestra principale.
+
+Il fornitore finisce in `%LOCALAPPDATA%\PDFListinoExtractor\supplier_rules.json`. Il file è in UTF-8 con BOM
+(si apre col Blocco note), viene scritto in modo atomico e validato con `config/supplier_rules.schema.json`;
+la versione precedente resta in una copia `.bak`. Gli aggiornamenti del programma non lo toccano.
+
+## Come funziona il motore
+
+Ogni soglia è ricavata dal documento: nessuna coordinata fissa. Dettagli e motivazioni in
+[docs/progetto-estrazione-universale.md](docs/progetto-estrazione-universale.md).
+
+- **Colonne**: dalla riga d'intestazione di ogni pagina, abbinata ai campi del profilo per etichetta o
+  sinonimo. Un testo appartiene alla colonna la cui etichetta gli si sovrappone di più, ed è così che si
+  leggono le colonne allineate a destra. Senza intestazione valgono le posizioni salvate nel profilo, in
+  frazioni della larghezza pagina.
+- **Testata e piè di pagina**: righe che si ripetono alla stessa altezza su almeno metà delle pagine (cifre
+  escluse, quindi «Pagina 3 di 121» ≡ «Pagina 4 di 121»). Non vanno elencate.
+- **Titoli di categoria**: corpo ≥ 1,3 volte il corpo mediano del documento. Chiudono l'articolo
+  precedente e non entrano nei dati.
+- **Articoli**: si individuano dalla colonna dell'ancora. Righe consecutive senza un distacco maggiore di
+  1,5 volte la sua interlinea mediana formano una corsa. Una corsa con più ancore si taglia fra un'ancora e
+  l'altra **nel distacco più ampio**: in una tabella a una riga per articolo è subito prima dell'ancora;
+  nel listino JBL è fra l'EAN di un articolo e il nome del successivo.
 - Il prezzo è quello nella colonna Prezzo dentro l'estensione verticale dell'articolo. Se ce n'è più di uno,
-  il programma **non sceglie**: lascia il prezzo vuoto e segnala la riga.
+  il programma **non sceglie**: lascia il prezzo vuoto e segnala la riga, indicando la colonna.
 - Una descrizione che prosegue in cima alla pagina successiva viene riattaccata all'articolo giusto.
+
+Sul listino JBL il motore dà gli stessi 673 articoli del vecchio motore a coordinate fisse, identici campo
+per campo. Li dà anche partendo dalla sola proposta automatica del wizard, senza il profilo scritto a mano.
 
 ### Anomalie segnalate (mai corrette in automatico)
 
@@ -154,28 +188,22 @@ confidenza bassa.
 Sul listino di gennaio 2026 le segnalazioni sono 16, tutte reali: 6 prezzi a `0,00`, 6 EAN non validi
 (dove al posto dell'EAN il PDF riporta altro, es. `PRX412M`), 4 testi troncati nel PDF stesso.
 
-## Un altro fornitore
-
-Aggiungere un profilo in `config/supplier_rules.json` (copiando `jbl_exhibo`) e regolare le coordinate.
-Per ricavarle:
-
-```powershell
-uv run python tools/analizza_pdf.py "percorso\listino.pdf" 1,2
-```
-
-stampa ogni riga di testo con posizione e corpo del carattere. Il profilo compare nel menu «Fornitore».
+Per un caso che il wizard non copre, `uv run python tools/analizza_pdf.py "listino.pdf" 1,2` stampa ogni riga
+di testo con posizione e corpo del carattere.
 
 ## Test
 
 ```powershell
-uv run pytest -q          # 66 test; quello OCR si salta se Tesseract non è installato
+uv run pytest -q          # 125 test; quello OCR si salta se Tesseract non è installato
 uv run ruff check .
 ```
 
-I test usano un PDF sintetico con risultati attesi noti (`tests/sintetico.py`, copia in
-`samples/listino_sintetico.pdf`) e, se presente, il listino reale `samples/Listino_JBL_Gen_2026.pdf`
-(673 articoli attesi). `tools/prova_gui.py` è il collaudo dell'interfaccia: avvia la finestra vera, estrae,
-cattura uno screenshot, esporta e misura la reattività durante il lavoro.
+I test usano due PDF sintetici con risultati attesi noti. `tests/sintetico.py` imita l'impaginazione JBL;
+`tests/sintetico_generico.py` è un layout opposto (SKU | Description | EAN | Price, formato inglese, una riga
+per articolo), anche nella variante senza intestazione. Se presente usano anche il listino reale
+`samples/Listino_JBL_Gen_2026.pdf`, con 673 articoli attesi. Collaudi sulla finestra vera:
+`tools/prova_gui.py` (estrazione), `tools/prova_wizard.py` (wizard) e, sull'eseguibile,
+`--collaudo` e `--collaudo-wizard <pdf> <regole.json>`.
 
 ## Struttura
 
@@ -187,14 +215,17 @@ PDFListinoExtractor.spec    compilazione PyInstaller
 installer/                  script Inno Setup, LEGGIMI e licenze di terze parti installati col programma
 scripts/                    build_exe.bat, build_installer.bat, imposta_versione.py
 assets/icona.ico            icona (rigenerabile con tools/crea_icona.py)
-docs/                       report dei test di distribuzione
-config/supplier_rules.json  regole per fornitore
+docs/                       progetto del motore universale, report dei test di distribuzione
+config/                     supplier_rules.json (regole distribuite) e supplier_rules.schema.json
 extractors/                 pdf_reader (apertura e verifica), text_extractor (testo + coordinate),
-                            table_extractor (colonne, area utile, righe), ocr_extractor (Tesseract)
-processors/                 article_parser (articoli), price_parser (prezzi), data_validator (anomalie),
-                            estrazione (flusso completo, anche in processo separato), models
+                            table_extractor (geometria: statistiche, testate ripetute, intestazione,
+                            colonne), ocr_extractor (Tesseract)
+processors/                 raggruppamento (righe -> articoli), article_parser (campi), profilo (schema 2,
+                            sinonimi), analisi_layout (pre-analisi del wizard), wizard (logica del wizard),
+                            estrazione, lavori (processo separato), price_parser, data_validator, models
 exporters/excel_exporter.py foglio Listino + report anomalie
-gui/                        main_window, preview_table, page_viewer, collaudo (--collaudo)
+gui/                        main_window, wizard_fornitore, lavoro (processo separato), preview_table,
+                            page_viewer, collaudo (--collaudo, --collaudo-wizard)
 tests/                      test automatici e generatore del PDF sintetico
 tools/                      analisi di un PDF nuovo, misure, collaudo dell'interfaccia
 ```

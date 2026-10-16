@@ -1,10 +1,11 @@
 [project]
 name = "pdf-listino-extractor"
-version = "1.0.0"
+version = "1.1.0"
 description = "Estrazione di listini prezzi PDF in Excel (Modello, Codice, EAN, Descrizione, Prezzo)"
 requires-python = ">=3.12"
 dependencies = [
     "customtkinter>=6.0.0",
+    "jsonschema>=4.26.0",
     "openpyxl>=3.1.5",
     "pillow>=12.3.0",
     "pymupdf>=1.28.2",

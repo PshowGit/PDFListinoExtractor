@@ -34,9 +34,11 @@ info_versione = VSVersionInfo(
 
 dati = [
     (str(RADICE / "config" / "supplier_rules.json"), "config"),
+    (str(RADICE / "config" / "supplier_rules.schema.json"), "config"),  # lo applica il salvataggio del wizard
     (str(RADICE / "assets" / "icona.ico"), "assets"),
 ]
 dati += collect_data_files("customtkinter")  # temi e font: senza, la finestra non si apre
+dati += collect_data_files("jsonschema_specifications")  # i metaschemi che jsonschema carica per validare
 
 a = Analysis(
     [str(RADICE / "main.py")],
