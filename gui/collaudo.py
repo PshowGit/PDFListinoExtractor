@@ -118,9 +118,11 @@ def _collauda(pdf: Path, xlsx: Path, report: dict) -> None:
 def esegui_collaudo_wizard(argv: list[str]) -> int:
     i = argv.index(OPZIONE_WIZARD)
     pdf, regole = Path(argv[i + 1]), Path(argv[i + 2])
-    report: dict = {"pdf": str(pdf), "regole": str(regole), "esito": "fallito"}
+    # pagina facoltativa: su un catalogo la prima pagina e' spesso l'indice, non una tabella
+    pagina = int(argv[i + 3]) if len(argv) > i + 3 and argv[i + 3].isdigit() else 1
+    report: dict = {"pdf": str(pdf), "regole": str(regole), "pagina": pagina, "esito": "fallito"}
     try:
-        _collauda_wizard(pdf, regole, report)
+        _collauda_wizard(pdf, regole, report, pagina)
     except Exception as e:
         report["errore"] = f"{type(e).__name__}: {e}"
         report["traceback"] = traceback.format_exc()
@@ -128,7 +130,7 @@ def esegui_collaudo_wizard(argv: list[str]) -> int:
     return 0 if report["esito"] == "ok" else 1
 
 
-def _collauda_wizard(pdf: Path, regole: Path, report: dict) -> None:
+def _collauda_wizard(pdf: Path, regole: Path, report: dict, pagina: int = 1) -> None:
     from tkinter import messagebox
 
     import customtkinter as ctk
@@ -142,6 +144,7 @@ def _collauda_wizard(pdf: Path, regole: Path, report: dict) -> None:
     radice = ctk.CTk()
     radice.withdraw()
     w = WizardFornitore(radice, config.elenco_fornitori(), pdf=pdf, percorso_regole=regole)
+    w.pagina = pagina  # prima che parta l'analisi, programmata dal costruttore
     w.geometry("1440x920+10+10")
     w.attributes("-topmost", True)
 

@@ -11,6 +11,10 @@ function Verifica($nome, $ok, $dettaglio = '') {
 
 $accenti = [string][char]0xE0 + [char]0xE8 + [char]0xF9            # "aeu" accentate, senza dipendere dalla codifica del file
 $base = "D:\tmp\Installazione prova $accenti"
+# I programmi lanciati da qui usano una %LOCALAPPDATA% di prova: le regole personali vere dell'utente
+# (i fornitori creati col wizard) non vengono mai lette, scritte o cancellate dal collaudo.
+$env:LOCALAPPDATA = "$base\AppData Local di prova"
+New-Item -ItemType Directory -Force $env:LOCALAPPDATA | Out-Null
 $dir = "$base\PDFListinoExtractor"
 $exe = "$dir\PDFListinoExtractor.exe"
 $chiave = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{F0411EB9-947B-42C1-B41A-62EFF2E34BD1}_is1'
