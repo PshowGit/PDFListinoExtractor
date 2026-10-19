@@ -9,6 +9,7 @@ articoli in uno.
 import itertools
 import re
 import statistics
+from dataclasses import dataclass
 
 from extractors.table_extractor import (
     ESTERNO,
@@ -48,11 +49,96 @@ def aspetto_codice(testo: str) -> bool:
     return 0 < len(parole) <= 3 and len(testo) <= 40 and bool(_TOKEN_CODICE.match(parole[0]))
 
 
-def unisci_righe(testi: list[str]) -> str:
+# una parola come la legge il vocabolario: lettere, anche unite da trattini ("water-resistant")
+_PAROLA = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*")
+# fine riga che puo' essere una sillabazione: lettere seguite dal trattino, dopo l'inizio o un segno che non
+# e' ne' lettera ne' cifra ne' trattino ("recen-", "l’appli-", "Mic/Linea/Chi-"; non "RS232-USB-", "6500K-")
+_CODA_SILLABA = re.compile(r"(?:^|[^\w-])([^\W\d_]+)-$")
+_TESTA_SILLABA = re.compile(r"[^\W\d_]+")
+
+
+def _parole(spans: list[Span]) -> frozenset[str]:
+    """Parole del documento, in minuscolo: quelle unite da trattini sia intere sia nei loro pezzi.
+
+    Non conta la parola che chiude una riga col trattino ("recen-"): e' proprio cio' che si vuole capire.
+    """
+    parole: set[str] = set()
+    for s in spans:
+        for m in _PAROLA.finditer(s.testo):
+            if s.testo[m.end():m.end() + 1] == "-":
+                continue
+            parola = m.group(0).lower()
+            parole.add(parola)
+            parole.update(parola.split("-"))
+    return frozenset(parole)
+
+
+def _trattino(sinistra: str, destra: str, parole: frozenset[str]) -> str | None:
+    """Che cosa dice il documento del trattino in fondo a `sinistra`, seguito a capo da `destra`.
+
+    None se non puo' spezzare una parola: senza lettere ai suoi lati (codici e sigle: "MTC-29UB", "RJ-45")
+    o con la maiuscola dopo ("Bi-Amp", "Dip-Switch"). Altrimenti "composto" se la forma col trattino
+    compare nel documento ("U-bracket"), "sillaba" se compare la parola intera ("processo-re",
+    "Ri-soluzione"), "spezzata" se il pezzo di sinistra non e' una parola ("recen-temente"), "parole" se
+    lo e' ("two-part", "high-performance").
+    """
+    coda = _CODA_SILLABA.search(sinistra.rsplit(" ", 1)[-1])
+    testa = _TESTA_SILLABA.match(destra)
+    if coda is None or testa is None or not destra[0].islower():
+        return None
+    pezzo, seguito = coda.group(1).lower(), testa.group(0).lower()
+    if f"{pezzo}-{seguito}" in parole:
+        return "composto"
+    if pezzo + seguito in parole:
+        return "sillaba"
+    return "parole" if pezzo in parole else "spezzata"
+
+
+@dataclass(frozen=True)
+class Vocabolario:
+    """Le parole del documento e se il documento va a capo spezzando le parole col trattino.
+
+    Il trattino di una parola andata a capo si toglie quando la parola intera compare nel documento; quando
+    il pezzo di sinistra non e' una parola («recen-temente») solo se il documento sillaba. Senza questa
+    condizione un listino breve in inglese perdeva il trattino di «water-resistant» («water» non vi compare
+    da solo). Misurato: nel listino JBL nessuna sillabazione confermata contro 46 composti, nessun trattino
+    tolto; nel catalogo Etabeta 39 parole ricomposte («Alo-ne», «l’appli-cazione») e i composti lasciati come
+    sono («Plug-in», «pre-fader»). Resta «com-pattata»: «com» e' una parola del documento (da «.com»).
+    """
+
+    parole: frozenset[str] = frozenset()
+    sillaba: bool = False
+
+    @classmethod
+    def del_documento(cls, pagine: list[list[Span]], corpo: float) -> "Vocabolario":
+        """Il documento sillaba se i trattini a capo confermati come parole spezzate sono piu' di quelli
+        confermati come composti. A capo e' la riga che comincia alla stessa x, entro due corpi sotto."""
+        parole = _parole([s for spans in pagine for s in spans])
+        conferme = {"sillaba": 0, "composto": 0}
+        for spans in pagine:
+            for s in spans:
+                if not _CODA_SILLABA.search(s.testo):
+                    continue
+                sotto = [t for t in spans if s.y0 < t.y0 <= s.y0 + 2 * corpo and abs(t.x0 - s.x0) <= corpo]
+                if sotto:
+                    esito = _trattino(s.testo, min(sotto, key=lambda t: t.y0).testo, parole)
+                    if esito in conferme:
+                        conferme[esito] += 1
+        return cls(parole, conferme["sillaba"] > conferme["composto"])
+
+    def a_capo(self, sinistra: str, destra: str) -> bool:
+        """Se il trattino in fondo a `sinistra` spezza una parola andata a capo, e va tolto."""
+        esito = _trattino(sinistra, destra, self.parole)
+        return esito == "sillaba" or (esito == "spezzata" and self.sillaba)
+
+
+def unisci_righe(testi: list[str], vocabolario: Vocabolario | None = None) -> str:
     """Unisce righe spezzate senza incollare parole separate.
 
     Una riga che termina con un trattino attaccato a una parola ("water-") prosegue nella
     successiva senza spazio ("water-resistant"); un trattino isolato (" -") resta un separatore.
+    Con il vocabolario del documento, il trattino di una parola andata a capo si toglie
+    («Alo-» / «ne» -> «Alone»; v. `Vocabolario`).
     """
     risultato = ""
     for t in testi:
@@ -62,6 +148,8 @@ def unisci_righe(testi: list[str]) -> str:
         if not risultato:
             risultato = t
         elif risultato.endswith("-") and len(risultato) > 1 and not risultato[-2].isspace():
+            if vocabolario is not None and vocabolario.a_capo(risultato, t):
+                risultato = risultato[:-1]
             risultato += t
         else:
             risultato += " " + t
@@ -104,6 +192,7 @@ class ParserListino:
         self.marca = ""
         self.metr: Metriche | None = None
         self.firme: set = set()
+        self.vocabolario = Vocabolario()  # parole del documento, per i trattini a capo
         self.ancora: str | None = None if self.p["ancora"] == "auto" else self.p["ancora"]
         self.passo_ancora: float | None = None
         self.categoria = ""
@@ -116,6 +205,7 @@ class ParserListino:
         """Statistiche, righe ripetute e ancora, calcolate una volta sola su tutte le pagine (o un campione)."""
         self.metr = metriche([s for s, _, _ in pagine])
         self.firme = firme_ripetute([(s, h) for s, _, h in pagine], self.metr.tolleranza_riga)
+        self.vocabolario = Vocabolario.del_documento([s for s, _, _ in pagine], self.metr.corpo)
         tabelle = [self._tabella(s, w, h) for s, w, h in pagine]
         if self.ancora is None:
             self.ancora = self._ancora_per_densita(tabelle)
@@ -389,7 +479,7 @@ class ParserListino:
             testi = [r.testo for r in righe]
             if "descrizione" in campi:
                 base = "" if art.descrizione_da_modello else art.descrizione
-                art.descrizione = unisci_righe([base, *testi])
+                art.descrizione = unisci_righe([base, *testi], self.vocabolario)
                 art.descrizione_da_modello = False
             elif "prezzo" in campi:
                 if art.prezzo is None and not art.prezzo_testo and len(righe) == 1:
@@ -401,7 +491,8 @@ class ParserListino:
             else:
                 campo = self._chiave(col)
                 if not art.valore(campo):
-                    self._scrivi(art, campo, unisci_righe(testi))
+                    libero = self._profilo_colonna(col)["campo"] == TESTO_GENERICO
+                    self._scrivi(art, campo, unisci_righe(testi, self.vocabolario if libero else None))
                 else:
                     art.note_estrazione[campo] = (
                         f"Testo in piu' a pagina {pagina} (colonna «{col.etichetta}»): «{unisci_righe(testi)[:60]}»"
@@ -429,9 +520,11 @@ class ParserListino:
                 self._codice(art, unisci_righe([r.testo for r in righe]), col)
             elif pc["campo"] in ("modello", "ean", "descrizione", TESTO_GENERICO):
                 chiave = self._chiave(col)
-                testo = unisci_righe([r.testo for r in righe])
+                # solo nel testo libero un trattino a capo puo' spezzare una parola: modelli ed EAN sono codici
+                parole = self.vocabolario if pc["campo"] in ("descrizione", TESTO_GENERICO) else None
+                testo = unisci_righe([r.testo for r in righe], parole)
                 attuale = art.valore(chiave)
-                self._scrivi(art, chiave, unisci_righe([attuale, testo]) if attuale else testo)
+                self._scrivi(art, chiave, unisci_righe([attuale, testo], parole) if attuale else testo)
         mappati = self._campi_mappati(t)
         if not prezzi_visti and "prezzo" in mappati:
             art.note_estrazione["prezzo"] = "Prezzo mancante"

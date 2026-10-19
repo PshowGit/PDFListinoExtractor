@@ -18,7 +18,7 @@ Applicazione desktop Windows (Python 3.12, customtkinter) che estrae gli articol
 
 ```powershell
 uv run python main.py                                   # avvio dal sorgente
-uv run pytest -q                                        # suite completa (191 test, 1 saltato senza Tesseract)
+uv run pytest -q                                        # suite completa (206 test, 1 saltato senza Tesseract)
 uv run pytest tests/test_pdf_extraction.py -v           # un file
 uv run pytest tests/test_gui.py::test_ordinamento_per_prezzo_con_mancanti_in_fondo -v   # un test
 uv run ruff check .                                     # lint (config in pyproject.toml)
@@ -70,6 +70,7 @@ Scelte non ovvie, ognuna motivata da una misura o da un difetto reale:
   3. **Negli altri casi**: distacco più ampio dopo il punto medio fra due ancore, ma solo se il blocco sotto il taglio arriva all'ancora successiva (`fasce`).
 - **Ancora Modello**: se nel documento almeno il 70% dei valori ha l'aspetto di un codice (`aspetto_codice`), le righe che non lo hanno non sono articoli. In griglia, una cella senza prezzo e senza codice non è un articolo.
 - **Testo dal PDF**: `text_extractor` unisce gli span che si toccano (`_unisci_contigui`) e ricompone legature e glifi di Calibri scritti male da Acrobat Distiller («Ɵ»→ti, «Ʃ»→tt, «ƫ»→tti, «Ampliﬁ catore»). Senza, le descrizioni del catalogo Etabeta uscivano spezzate.
+- **Trattino a fine riga** (`article_parser.Vocabolario`, solo per descrizione e colonne di testo, mai per codici e modelli): il trattino si toglie se la parola intera compare nel documento («processo-re», «Alo-ne»); se il pezzo di sinistra non è una parola («recen-temente»), solo se **il documento sillaba**, cioè se `prepara` trova più trattini a capo confermati come parole spezzate che come composti. Restano composti («U-bracket», «Plug-in»), sigle («MTC-29UB»), maiuscole dopo il trattino («Bi-Amp») e coppie di parole («two-part»). Senza la condizione sul documento, il JBL sintetico perdeva il trattino di «water-resistant». Misurato: JBL nessun cambiamento (0 sillabazioni confermate contro 46 composti), Etabeta 39 parole ricomposte.
 - **Il validatore segnala solo i campi che il profilo prevede**: su un listino senza colonna Modello, «Modello mancante» su ogni riga era rumore.
 - **Le anomalie non si correggono mai in automatico.** Gli errori dell'estrazione stanno in `Articolo.note_estrazione` (per campo) e un intervento dell'utente sul campo li cancella (`Articolo.imposta`). Quelle del validatore stanno in `Articolo.anomalie` e si ricalcolano da zero dopo ogni modifica, perché i duplicati dipendono da tutte le righe. Non si scartano nemmeno i duplicati.
 - **Tutto ciò che apre il PDF gira in un processo separato** (`processors/lavori.esegui`: estrazione, analisi del wizard, anteprima; lato interfaccia `gui/lavoro.LavoroInProcesso`, contesto `spawn`), non in un thread. PyMuPDF tiene il GIL durante l'analisi di ogni pagina: in un thread l'interfaccia restava ferma per tutto il lavoro (5 s su un PDF di 1.210 pagine). Ne seguono due obblighi: ogni script che apre una finestra deve avere la guardia `if __name__ == "__main__"`, e `main.py` chiama `multiprocessing.freeze_support()` per l'eseguibile. Si ridisegna solo l'ultimo avanzamento ricevuto, perché aggiornare a ogni pagina bloccava la finestra.
@@ -85,7 +86,7 @@ Scelte non ovvie, ognuna motivata da una misura o da un difetto reale:
   - 74 bollini «NEW» presi per categoria su pagine senza griglia;
   - testo promozionale di fondo pagina attaccato alla descrizione dell'ultimo articolo;
   - 228 righe di descrizione ancora perse;
-  - una parola andata a capo col trattino resta col trattino («Alo-ne»).
+  - qualche parola andata a capo resta col trattino quando il pezzo di sinistra è anche una parola e quella intera non compare altrove («com-pattata»: «com» viene da «.com»).
 
 ## Test
 

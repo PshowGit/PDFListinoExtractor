@@ -8,7 +8,8 @@ senza intestazione; una sezione con modelli scritti come nomi («IsoLater»); un
 quotazioni» su due righe (prezzi scritti «EUR 888,00»: il font helv dei PDF di prova non ha il «€»); testo promozionale centrato nella colonna della marca;
 schede prodotto (pagine 140 e 225 del PDF vero): codice, titolo e prezzo sulla prima riga, una linea sotto e
 le caratteristiche nella sola colonna della descrizione, nella cella successiva; un bollino «NEW» in corpo
-12 sotto il codice, nella sua cella, che non e' un titolo di sezione (pagina 13).
+12 sotto il codice, nella sua cella, che non e' un titolo di sezione (pagina 13); una parola della
+descrizione spezzata a capo col trattino.
 """
 from dataclasses import dataclass
 from decimal import Decimal
@@ -38,8 +39,9 @@ PAGINE = [
         (["VMHM4I"], ["Scheda input 4 canali HDMI"], ["EUR 888,00"]),
         (["VMHM2I-4K"], ["Scheda input 2 canali HDMI 4k@60Hz con", "audio analogico"], ["EUR 1.400,00"]),
         (["VMHM2I"], ["Scheda input 2 canali HDMI 4k@30Hz con", "audio analogico"], ["EUR 1.073,00"]),
-        (["VMHD4I"], ["Scheda input 4 canali HDBaseT"], ["EUR 1.850,00"]),
-        (["VMX-1"], ["Matrice modulare", "Potenza 20W", "Frequenza 2-15kHz", "Dimensioni 115x115"], ["EUR 44,00"]),
+        (["VMHD4I"], ["Scheda modulare 4 canali HDBaseT"], ["EUR 1.850,00"]),
+        # una parola andata a capo col trattino («Alo-ne» a pagina 225 del PDF vero): si ricompone
+        (["VMX-1"], ["Matrice modu-", "lare Potenza 20W", "Frequenza 2-15kHz", "Dimensioni 115x115"], ["EUR 44,00"]),
         ("spazio", 30),
         ("tabella", "ARX", "AUDIBOX"),
         (["IsoLater"], ["Trasformatore di isolamento"], ["EUR 218,00"]),
@@ -47,8 +49,10 @@ PAGINE = [
         (["Pro DI"], ["Bilanciatore attivo", "Active Direct Box"], ["Chiedere", "quotazioni"]),
     ],
     [
-        # la tabella ARX prosegue senza intestazione in cima alla pagina
-        (["Iso Switcher"], ["Commutatore stereo A/B", "2+2 XLR/In - 2 XLR/Out"], ["EUR 175,00"]),
+        # la tabella ARX prosegue senza intestazione in cima alla pagina; «Commuta-» / «tore» si ricompone
+        # perche' il documento sillaba («modu-lare», con «modulare» scritto altrove), anche se
+        # «commutatore» non compare intero
+        (["Iso Switcher"], ["Commuta-", "tore stereo A/B 2+2 XLR/In - 2 XLR/Out"], ["EUR 175,00"]),
         ("spazio", 30),
         ("tabella", "MOGAMI", "CAVI CAT5E"),
         (["M-CAT5E-2"], ["Cavo Mogami CAT5E - 2 metri"], ["EUR 16,00"]),
@@ -77,7 +81,7 @@ ATTESI = [
     AttesoCatalogo("VMHM4I", "Scheda input 4 canali HDMI", Decimal("888.00"), 1, _V),
     AttesoCatalogo("VMHM2I-4K", "Scheda input 2 canali HDMI 4k@60Hz con audio analogico", Decimal("1400.00"), 1, _V),
     AttesoCatalogo("VMHM2I", "Scheda input 2 canali HDMI 4k@30Hz con audio analogico", Decimal("1073.00"), 1, _V),
-    AttesoCatalogo("VMHD4I", "Scheda input 4 canali HDBaseT", Decimal("1850.00"), 1, _V),
+    AttesoCatalogo("VMHD4I", "Scheda modulare 4 canali HDBaseT", Decimal("1850.00"), 1, _V),
     AttesoCatalogo("VMX-1", "Matrice modulare Potenza 20W Frequenza 2-15kHz Dimensioni 115x115", Decimal("44.00"), 1, _V),
     AttesoCatalogo("IsoLater", "Trasformatore di isolamento", Decimal("218.00"), 1, _A),
     AttesoCatalogo("Super Splitter Duo", "Transformer Isolated 2xInput 2xDirect Out - 2xSplit 1", Decimal("340.00"), 1, _A),

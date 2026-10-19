@@ -1,6 +1,8 @@
 from decimal import Decimal
 
-from processors.article_parser import ParserListino, unisci_righe
+import pytest
+
+from processors.article_parser import ParserListino, Vocabolario, _parole, unisci_righe
 from processors.data_validator import ean_valido
 from processors.models import Span
 
@@ -22,6 +24,64 @@ def test_unisci_righe_non_incolla_parole_e_ricompone_i_trattini():
     assert unisci_righe(["Diffusore  water-", "resistant", "IP55"]) == "Diffusore water-resistant IP55"
     assert unisci_righe(["Serie A -", "nero"]) == "Serie A - nero"
     assert unisci_righe(["", "  uno  ", "due"]) == "uno due"
+
+
+# vocabolario di un documento finto: «alone» e «risoluzione» intere, «U-bracket» col trattino, «two» e «part»
+_DOCUMENTO = [_span(t, 0, 0) for t in ("Effetto alone", "alta risoluzione", "staffa U-bracket", "two way",
+                                       "part number", "per l’appli-", "recen-")]
+
+
+def _vocabolario(sillaba: bool) -> Vocabolario:
+    return Vocabolario(_parole(_DOCUMENTO), sillaba)
+
+
+@pytest.mark.parametrize("righe, atteso", [
+    (["Effetto Alo-", "ne."], "Effetto Alone."),  # la parola intera c'e' nel documento
+    (["Ri-", "soluzione 4k"], "Risoluzione 4k"),
+    (["usato recen-", "temente"], "usato recentemente"),  # «recen» non e' una parola, e il documento sillaba
+    (["con l’appli-", "cazione"], "con l’applicazione"),  # dopo l'elisione
+    (["Mic/Linea/Chi-", "tarra"], "Mic/Linea/Chitarra"),
+    (["staffa U-", "bracket"], "staffa U-bracket"),  # la forma col trattino c'e' nel documento
+    (["giunto two-", "part"], "giunto two-part"),  # due parole: un composto
+    (["cavo MTC-", "29UB"], "cavo MTC-29UB"),  # codici e sigle
+    (["RS232-USB-", "converter"], "RS232-USB-converter"),
+    (["temperatura 6500K-", "kelvin"], "temperatura 6500K-kelvin"),
+    (["Bi-", "Amp"], "Bi-Amp"),  # maiuscola dopo il trattino
+])
+def test_trattino_a_capo_in_un_documento_che_sillaba(righe, atteso):
+    assert unisci_righe(righe, _vocabolario(sillaba=True)) == atteso
+
+
+def test_in_un_documento_che_non_sillaba_resta_il_trattino_dei_pezzi_sconosciuti():
+    # «water» non compare da solo: senza prove che il documento sillabi, «water-resistant» resta com'e'
+    assert unisci_righe(["Diffusore water-", "resistant"], _vocabolario(sillaba=False)) == "Diffusore water-resistant"
+    assert unisci_righe(["usato recen-", "temente"], _vocabolario(sillaba=False)) == "usato recen-temente"
+    # la parola intera nel documento basta sempre
+    assert unisci_righe(["Effetto Alo-", "ne."], _vocabolario(sillaba=False)) == "Effetto Alone."
+
+
+def test_il_vocabolario_non_conta_la_parola_spezzata_a_fine_riga():
+    parole = _parole(_DOCUMENTO)
+    assert {"alone", "u-bracket", "u", "bracket", "two", "part"} <= parole
+    assert "recen" not in parole and "appli" not in parole
+
+
+def test_il_documento_sillaba_se_le_parole_spezzate_confermate_sono_piu_dei_composti():
+    def riga(testo, y):
+        return Span(testo, 100, y, 100 + len(testo) * 4, y + 9, 9, 1)
+
+    altrove = [riga("alta risoluzione", 300), riga("effetto alone", 320)]
+    sillaba = [riga("Ri-", 100), riga("soluzione 4k", 110.8), riga("Effetto Alo-", 150), riga("ne.", 160.8)]
+    assert Vocabolario.del_documento([sillaba + altrove], 9).sillaba
+    composti = [riga("staffa U-", 100), riga("bracket", 110.8), riga("staffa U-bracket", 300)]
+    assert not Vocabolario.del_documento([composti], 9).sillaba
+    # la riga sotto deve cominciare alla stessa x: non e' il seguito una riga di un'altra colonna
+    lontana = [riga("Ri-", 100), Span("soluzione", 400, 110.8, 440, 119.8, 9, 1), *altrove]
+    assert not Vocabolario.del_documento([lontana], 9).sillaba
+
+
+def test_senza_vocabolario_i_trattini_restano():
+    assert unisci_righe(["Effetto Alo-", "ne."]) == "Effetto Alo-ne."
 
 
 def test_codici_con_zeri_iniziali_punti_e_trattini_restano_testo(regole):
