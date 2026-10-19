@@ -24,6 +24,9 @@ fornitore configurato prima delle colonne dinamiche, dà le cinque colonne di se
   la colonna è vuota e il nome sta tutto nella colonna Modello, si ripete il nome del modello.
 - **Prezzo**: numero vero (non testo), formato `#,##0.00`. Se il prezzo manca resta vuoto, non `0`.
 - Le colonne in più sono celle di testo.
+- **Marca**, se il profilo la prevede: la marca scritta nell'intestazione della tabella. Su una pagina senza
+  intestazione vale quella della tabella precedente solo se la pagina la nomina; altrimenti resta vuota e
+  l'anteprima la segnala come «Marca mancante».
 
 Intestazioni in grassetto, filtri automatici, prima riga bloccata, descrizione con testo a capo.
 Nessuna colonna tecnica: le anomalie si vedono nell'anteprima e si possono salvare in un **report separato**.
@@ -146,7 +149,8 @@ Nella finestra principale: **Configura nuovo fornitore…**
    ricostruisce le colonne dalla posizione del testo, con i prezzi allineati a destra trattati a parte.
 2. Per ogni colonna il menu propone un campo, dedotto da intestazione e contenuto: Modello, Codice, EAN,
    Descrizione, Prezzo, *Modello + Codice + EAN impilati* nella stessa colonna (come nel listino JBL),
-   *Testo* per una colonna in più, oppure *ignora*. Sotto il menu c'è il **nome della colonna** nella tabella
+   *Testo* per una colonna in più, *Marca* per la colonna sopra cui l'intestazione di ogni tabella scrive la
+   marca (come nel catalogo Etabeta), oppure *ignora*. Sotto il menu c'è il **nome della colonna** nella tabella
    e nell'Excel: l'intestazione del PDF se è il nome di quel campo («Articolo», «Listino», «Prezzo al
    Pubblico»), altrimenti il nome standard; si può cambiare. Un clic su una colonna della pagina evidenzia
    il suo menu.

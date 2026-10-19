@@ -8,7 +8,7 @@ Per modificare un fornitore gia' salvato, `applica_profilo` riporta la sua mappa
 trovate nella pagina analizzata; al salvataggio `profilo` conserva le regole che il wizard non mostra.
 """
 from processors.analisi_layout import AnalisiLayout, ColonnaRilevata, profilo_da_analisi
-from processors.models import INTESTAZIONI, TESTO_GENERICO
+from processors.models import INTESTAZIONI, MARCA, TESTO_GENERICO
 from processors.profilo import (
     CAMPI_ANCORA,
     REGEX_CODICE_PARENTESI,
@@ -27,6 +27,7 @@ ETICHETTE_CAMPO = {
     "prezzo": "Prezzo",
     "identificativo": "Modello + Codice + EAN (impilati)",
     TESTO_GENERICO: "Testo (colonna in piu')",
+    MARCA: "Marca (dall'intestazione)",
 }
 ETICHETTE_ANCORA = {
     "auto": "Automatica (per densità)",
@@ -45,11 +46,12 @@ COLORI_CAMPO = {
     "prezzo": "#D62728",
     "identificativo": "#FF7F0E",
     TESTO_GENERICO: "#17BECF",
+    MARCA: "#E377C2",
 }
 
 
 def campi_di(campo_colonna: str) -> set[str]:
-    if campo_colonna == TESTO_GENERICO:
+    if campo_colonna in (TESTO_GENERICO, MARCA):
         return set()  # non e' un campo del motore: non identifica l'articolo e non fa da ancora
     return {"modello", "codice", "ean"} if campo_colonna == "identificativo" else {campo_colonna}
 

@@ -10,8 +10,11 @@ INTESTAZIONI = {
     "ean": "EAN",
     "descrizione": "Descrizione",
     "prezzo": "Prezzo",
+    "marca": "Marca",
 }
 TESTO_GENERICO = "testo_generico"  # ruolo di una colonna in piu' (colore, note...): solo testo
+# ruolo della colonna sopra cui l'intestazione di ogni tabella scrive la marca (catalogo Etabeta)
+MARCA = "marca"
 
 
 @dataclass(frozen=True)

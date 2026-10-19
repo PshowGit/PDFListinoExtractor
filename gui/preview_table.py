@@ -11,13 +11,13 @@ from tkinter import messagebox, ttk
 import customtkinter as ctk
 
 from processors.data_validator import valida
-from processors.models import COLONNE_STANDARD, TESTO_GENERICO, Articolo, ColonnaUscita
+from processors.models import COLONNE_STANDARD, MARCA, TESTO_GENERICO, Articolo, ColonnaUscita
 from processors.price_parser import formatta_prezzo, parse_prezzo
 from processors.profilo import colonne_uscita, normalizza
 
 # dopo le colonne del documento: non modificabili, non esportate
 FISSE = (ColonnaUscita("pagina", "Pag.", "pagina"), ColonnaUscita("note", "Anomalie", "note"))
-LARGHEZZE = {"modello": 170, "codice": 160, "ean": 110, "descrizione": 420, "prezzo": 90, TESTO_GENERICO: 140,
+LARGHEZZE = {"modello": 170, "codice": 160, "ean": 110, "descrizione": 420, "prezzo": 90, TESTO_GENERICO: 140, MARCA: 130,
              "pagina": 45, "note": 260}
 
 

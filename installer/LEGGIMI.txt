@@ -15,7 +15,8 @@ USO
 UN FORNITORE NUOVO
  "Configura nuovo fornitore..." apre il wizard: si apre il listino, il programma riconosce le colonne e
  le colora sulla pagina, si sceglie per ogni colonna il campo (Modello, Codice, EAN, Descrizione, Prezzo,
- Testo per una colonna in piu') e il nome con cui compare nell'Excel, si prova con "Anteprima pagina" e
+ Testo per una colonna in piu', Marca per la marca scritta nell'intestazione di ogni tabella) e il nome
+ con cui compare nell'Excel, si prova con "Anteprima pagina" e
  si salva. Il fornitore compare subito nel menu Fornitore.
  Accanto al menu: "Modifica..." riapre nel wizard un fornitore configurato, con la sua mappatura, per
  correggerla; "Rinomina..." ne cambia il nome; "Rimuovi" lo toglie. Il fornitore distribuito col

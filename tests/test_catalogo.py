@@ -88,8 +88,9 @@ def catalogo(request, tmp_path):
 def test_proposta_del_wizard_sul_catalogo(catalogo):
     pdf, linee = catalogo
     a = analizza_pdf(str(pdf), 1)
-    # la marca col testo promozionale si ignora, il titolo centrato della tabella e' la descrizione
-    assert [c.campo_proposto for c in a.colonne] == ["ignora", "modello", "descrizione", "prezzo"]
+    # la colonna della marca: il testo promozionale sotto si ignora, la marca e' la sua etichetta, che cambia
+    # da una tabella all'altra; il titolo centrato della tabella e' la descrizione
+    assert [c.campo_proposto for c in a.colonne] == ["marca", "modello", "descrizione", "prezzo"]
     assert (a.ancora_proposta, a.formato_prezzo_proposto, a.linee_divisorie_proposte) == ("modello", "it", linee)
     assert a.colonne[2].x0 == pytest.approx(238, abs=1)  # dove comincia il testo, non il titolo centrato
 
@@ -103,6 +104,8 @@ def test_estrazione_del_catalogo(catalogo):
     for x, t in zip(articoli, attesi_, strict=True):
         assert (x.modello, x.descrizione, x.prezzo, x.pagina, x.categoria) == (
             t.modello, t.descrizione, t.prezzo, t.pagina, t.categoria), t.modello
+        # la marca dell'intestazione della tabella, anche dove la tabella prosegue senza (Iso Switcher)
+        assert x.valore("marca") == (t.categoria.split(" · ")[0] if t.marca is None else t.marca), t.modello
         for attesa in t.anomalie:
             assert any(attesa in y for y in x.tutte_le_anomalie()), (t.modello, x.tutte_le_anomalie())
 
@@ -140,7 +143,8 @@ def test_etabeta_copertura_dei_prezzi(etabeta):
 @reale
 def test_etabeta_casi_misurati(etabeta):
     a, ris = etabeta
-    assert [c.campo_proposto for c in a.colonne] == ["ignora", "modello", "descrizione", "prezzo"]
+    assert [c.campo_proposto for c in a.colonne] == ["marca", "modello", "descrizione", "prezzo"]
+    assert [c.etichetta for c in ris.colonne] == ["Marca", "Modello", "Descrizione", "Prezzo"]
     per = {(x.pagina, x.modello): x for x in ris.articoli}
     # codice centrato in una cella di due righe (pagina 22)
     x = per[(22, "VMHM2I-4K")]
@@ -153,5 +157,9 @@ def test_etabeta_casi_misurati(etabeta):
     assert per[(236, "BE-AD/W")].prezzo == Decimal("14.00")
     # marca e titolo della tabella come categoria (pagina 4)
     assert per[(4, "M-CAT5E-2")].categoria == "MOGAMI · CAVI MOGAMI CAT-5ProB-3381/RJ45"
+    # la marca come colonna (pagine 22, 270, e 13 dove un bollino «NEW» la cambiava)
+    assert per[(22, "VMHM2I-4K")].valore("marca") == "VISSONIC"
+    assert per[(270, "CC-960")].valore("marca") == "Konig & Meyer"
+    assert per[(13, "HBTY")].valore("marca") == "VISSONIC"
     # legature ricomposte nei dati
     assert not any(c in x.descrizione for x in ris.articoli for c in "ﬀﬁﬂﬃƟƩƫ")

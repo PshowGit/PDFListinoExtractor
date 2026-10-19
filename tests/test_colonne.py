@@ -116,3 +116,38 @@ def test_report_anomalie_con_le_colonne_che_identificano(tmp_path):
     ws = load_workbook(p)["Anomalie"]
     assert [c.value for c in ws[1]] == ["Pagina", "Articolo", "Anomalia"]
     assert [c.value for c in ws[2]] == [22, "VMHM4I", "Prezzo mancante"]
+
+
+# --- marca ------------------------------------------------------------------------------------------
+
+def test_colonna_marca_dal_profilo():
+    profilo = normalizza({"nome": "Catalogo", "colonne": [
+        {"campo": "marca"}, {"campo": "modello", "etichetta": "Articolo"}, {"campo": "prezzo"}]})
+    assert _chiavi(colonne_uscita(profilo)) == [
+        ("marca", "Marca", "marca"), ("modello", "Articolo", "modello"), ("prezzo", "Prezzo", "prezzo")]
+    valida_schema({"versione_schema": 2, "fornitori": {"c": {"nome": "C", "colonne": [
+        {"campo": "marca", "etichetta": "Brand"}, {"campo": "modello"}]}}})
+
+
+def test_marca_mancante_segnalata_solo_se_prevista():
+    from processors.data_validator import valida
+
+    con = {"colonne": [{"campo": "marca"}, {"campo": "modello"}]}
+    a, b = Articolo("A", altri={"marca": "VISSONIC"}), Articolo("B")
+    valida([a, b], con)
+    assert a.anomalie == [] and b.anomalie == ["Marca mancante"]
+    valida([b], {"colonne": [{"campo": "modello"}]})
+    assert b.anomalie == []
+
+
+def test_excel_marca_come_testo(tmp_path):
+    from openpyxl import load_workbook
+
+    from exporters.excel_exporter import esporta_listino
+
+    colonne = [ColonnaUscita("marca", "Marca", "marca"), *_TRE]
+    p = tmp_path / "m.xlsx"
+    esporta_listino([Articolo("VMHM4I", prezzo=Decimal("888.00"), altri={"marca": "VISSONIC"})], p, colonne)
+    ws = load_workbook(p)["Listino"]
+    assert [c.value for c in ws[1]] == ["Marca", "Articolo", "Descrizione", "Listino"]
+    assert ws["A2"].value == "VISSONIC" and ws["A2"].number_format == "@"

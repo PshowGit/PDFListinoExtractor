@@ -254,3 +254,18 @@ def test_nome_proposto_da_un_etichetta_su_due_righe(pdf_sintetico):
     m = ModelloWizard(analizza_pdf(str(pdf_sintetico), 1))
     assert m.campi == ["identificativo", "descrizione", "prezzo"]
     assert m.etichette == ["", "Descrizione", "Prezzo al Pubblico"]
+
+
+def test_wizard_propone_la_marca_sul_catalogo(tmp_path):
+    from processors.profilo import colonne_uscita, normalizza
+    from tests.sintetico_catalogo import crea_catalogo
+
+    m = ModelloWizard(analizza_pdf(str(crea_catalogo(tmp_path / "c.pdf")), 1))
+    assert m.campi == ["marca", "modello", "descrizione", "prezzo"]
+    assert m.etichette == ["Marca", "Articolo", "Descrizione", "Listino"]
+    m.nome = "Catalogo"
+    p = m.profilo()
+    # niente intestazione salvata: la marca cambia da una tabella all'altra; niente nome: e' quello standard
+    marca = p["colonne"][0]
+    assert (marca["campo"], marca["intestazioni"], "etichetta" in marca) == ("marca", [], False)
+    assert [c.etichetta for c in colonne_uscita(normalizza(p))] == ["Marca", "Articolo", "Descrizione", "Listino"]

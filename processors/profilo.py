@@ -9,10 +9,10 @@ import functools
 import re
 import unicodedata
 
-from processors.models import INTESTAZIONI, TESTO_GENERICO, ColonnaUscita
+from processors.models import INTESTAZIONI, MARCA, TESTO_GENERICO, ColonnaUscita
 
 CAMPI_DATI = ("modello", "codice", "ean", "descrizione", "prezzo")
-CAMPI_COLONNA = (*CAMPI_DATI, "identificativo", TESTO_GENERICO, "ignora")
+CAMPI_COLONNA = (*CAMPI_DATI, "identificativo", TESTO_GENERICO, MARCA, "ignora")
 CAMPI_ANCORA = ("codice", "ean", "modello", "prezzo")  # ordine di preferenza nella scelta automatica
 CONTIENE_PREDEFINITO = ["modello", "codice", "ean"]
 
@@ -158,7 +158,7 @@ def campi_mappati(profilo: dict) -> set[str]:
     for c in profilo["colonne"]:
         if c["campo"] == "identificativo":
             campi.update(c.get("contiene", CONTIENE_PREDEFINITO))
-        elif c["campo"] not in ("ignora", TESTO_GENERICO):
+        elif c["campo"] not in ("ignora", TESTO_GENERICO, MARCA):
             campi.add(c["campo"])
     return campi
 
@@ -182,6 +182,11 @@ def colonne_uscita(profilo: dict) -> list[ColonnaUscita]:
     visti: set[str] = set()
     for i, c in enumerate(profilo["colonne"]):
         campo = c["campo"]
+        if campo == MARCA:
+            if MARCA not in visti:
+                visti.add(MARCA)
+                out.append(ColonnaUscita(MARCA, c.get("etichetta") or INTESTAZIONI[MARCA], MARCA))
+            continue
         if campo == TESTO_GENERICO:
             n = len([k for k in testo if k <= i])
             nome = c.get("etichetta") or next(iter(c.get("intestazioni") or []), "") or f"Testo {n}"

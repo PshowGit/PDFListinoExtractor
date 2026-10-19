@@ -29,7 +29,7 @@ from extractors.table_extractor import (
 from extractors.text_extractor import estrai_span
 from processors.data_validator import ean_valido
 from processors.estrazione import _campione
-from processors.models import INTESTAZIONI, TESTO_GENERICO, Span
+from processors.models import INTESTAZIONI, MARCA, TESTO_GENERICO, Span
 from processors.price_parser import parse_prezzo
 from processors.profilo import (
     CAMPI_DATI,
@@ -264,6 +264,12 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
             # un'etichetta che non e' il nome di un campo («Colour») sopra testo allineato, quando quel ruolo
             # l'ha gia' un'altra colonna, o l'articolo ha gia' il suo codice: e' una colonna in piu'
             campo = TESTO_GENERICO
+        if campo == "ignora" and campo_intestazione is None and intest is not None and len(
+            {cols[i].etichetta for cols in colonne_di.values() if len(cols) == len(partenze)}
+        ) >= 2:
+            # sopra testo da ignorare, un'etichetta che cambia da una tabella all'altra e non e' il nome di
+            # un campo: la marca (catalogo Etabeta: «VISSONIC», «MOGAMI», «Konig & Meyer»)
+            campo = MARCA
         x1 = xs[i + 1] - 1 if i + 1 < len(xs) else larghezza
         fine = max([s.x1 for s in spans_col[i]] + ([fisiche[i].x1] if fisiche[i].x1 else []), default=None)
         colonne.append(ColonnaRilevata(x, x1, etichetta, campo, esempi[i], intest is not None, len(testi[i]), fine,

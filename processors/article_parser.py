@@ -27,9 +27,9 @@ from extractors.table_extractor import (
 )
 from processors import raggruppamento
 from processors.data_validator import ean_valido
-from processors.models import CAMPI, TESTO_GENERICO, Articolo, Span
+from processors.models import CAMPI, MARCA, TESTO_GENERICO, Articolo, Span
 from processors.price_parser import RisultatoPrezzo, parse_prezzo
-from processors.profilo import CAMPI_ANCORA, CONTIENE_PREDEFINITO, chiavi_testo, normalizza
+from processors.profilo import CAMPI_ANCORA, CONTIENE_PREDEFINITO, chiavi_testo, normalizza, normalizza_testo
 
 _SPAZI = re.compile(r"\s+")
 # il campo d'ancoraggio deve coprire almeno questa quota delle righe del campo piu' denso
@@ -72,6 +72,13 @@ def _pulito(testo: str) -> str:
     return _SPAZI.sub(" ", testo).strip()
 
 
+def _nominata(marca: str, spans: list[Span]) -> bool:
+    """Se il testo della pagina nomina la marca: ogni sua parola di almeno tre lettere ("Konig & Meyer")."""
+    testo = normalizza_testo(" ".join(s.testo for s in spans)).replace(" ", "")
+    parole = [w for w in normalizza_testo(marca).split() if len(w) >= 3]
+    return bool(parole) and all(w in testo for w in parole)
+
+
 class _Tabella:
     """Una pagina divisa in colonne fisiche: righe per colonna e titoli."""
 
@@ -92,6 +99,9 @@ class ParserListino:
         self.re_prezzo = re.compile(rx["prezzo"]) if rx.get("prezzo") else None
         self.re_escludi = [re.compile(e) for e in self.p.get("escludi", [])]
         self.chiavi_testo = chiavi_testo(self.p)  # indice della colonna del profilo -> "testo_1"...
+        # colonna della marca: il suo valore e' l'etichetta che l'intestazione di ogni tabella le scrive sopra
+        self.indice_marca = next((i for i, c in enumerate(self.p["colonne"]) if c["campo"] == MARCA), None)
+        self.marca = ""
         self.metr: Metriche | None = None
         self.firme: set = set()
         self.ancora: str | None = None if self.p["ancora"] == "auto" else self.p["ancora"]
@@ -181,9 +191,9 @@ class ParserListino:
             if dove == TITOLO:
                 titoli.append(s)
             elif (dove != ESTERNO and colonne[dove].indice is not None
-                  and self.p["colonne"][colonne[dove].indice]["campo"] != "ignora"):
-                # le colonne da ignorare (la marca e il testo promozionale di un catalogo) restano
-                # confini, ma il loro testo non entra in nessun campo
+                  and self.p["colonne"][colonne[dove].indice]["campo"] not in ("ignora", MARCA)):
+                # le colonne da ignorare (il testo promozionale di un catalogo) e quella della marca, che
+                # la prende dall'intestazione, restano confini, ma il testo sotto non entra in nessun campo
                 per_colonna.setdefault(dove, []).append(s)
         t = _Tabella(
             colonne,
@@ -262,6 +272,16 @@ class ParserListino:
         # categoria: titoli di sezione e, nei cataloghi, marca e titolo scritti nell'intestazione della tabella
         categorie = sorted([(r.y0, r.testo) for r in t.titoli]
                            + [(i.y0, " · ".join(i.variabili)) for i in intest if i.variabili])
+        # marca: l'etichetta d'intestazione abbinata alla colonna della marca; una tabella che prosegue
+        # nella pagina dopo senza intestazione tiene quella di prima, come la categoria
+        marche = sorted((i.y0, c.etichetta) for i in intest for c in i.colonne
+                        if self.indice_marca is not None and c.indice == self.indice_marca)
+        if not intest and self.marca and not _nominata(self.marca, spans):
+            # una pagina senza intestazione di tabella non dice di chi e': la marca della tabella precedente
+            # vale solo se la pagina la nomina (Cloud, pagine 45-56). Nel catalogo Etabeta le altre sono schede
+            # col solo logo (Chromateq a pagina 224, AVMATRIX a 325), dove quella marca era sbagliata in 208
+            # articoli: resta vuota e il validatore la segnala, invece di inventarla
+            self.marca = ""
         gruppi = []
         if n_ancora is not None:
             col = t.colonne[n_ancora]
@@ -337,12 +357,19 @@ class ParserListino:
             sopra = [testo for y, testo in categorie if y < inizio]
             if sopra:
                 self.categoria = sopra[-1]
+            marca = [m for y, m in marche if y < inizio]
+            if marca:
+                self.marca = marca[-1]
             per_colonna = {n: sorted(v, key=lambda r: r.y0) for n, v in per_articolo[k].items()}
             art = self._articolo(t, per_colonna, pagina)
+            if self.indice_marca is not None:
+                art.altri[MARCA] = self.marca
             articoli.append(art)
             self.ultimo = art
         if not gruppi and categorie:
             self.categoria = categorie[-1][1]
+        if not gruppi and marche:
+            self.marca = marche[-1][1]
         return articoli
 
     def _prosecuzione(self, t: _Tabella, prima: dict[int, list[Riga]], pagina: int, categorie) -> None:

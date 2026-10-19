@@ -28,6 +28,7 @@ class AttesoCatalogo:
     pagina: int
     categoria: str
     anomalie: tuple[str, ...] = ()
+    marca: str | None = None  # None: quella dell'intestazione, la prima parte della categoria
 
 
 # (righe del modello, righe della descrizione, righe del prezzo)
@@ -64,6 +65,11 @@ PAGINA_SCHEDE = [
     (["P8-CX"], ["Diffusore coassiale", "Woofer 8 HQ", "Risposta 60Hz-22KHz"], ["EUR 2.275,00"], "NEW"),
     (["PCX-WB"], ["Staffa a muro fissa"], ["EUR 185,00"]),
 ]
+# una scheda col solo logo, senza intestazione di tabella e senza nominare la marca (pagina 224 del PDF vero):
+# la marca della tabella precedente non vale, resta vuota e segnalata
+PAGINA_SENZA_INTESTAZIONE = [
+    (["CQ02-IR"], ["Kit telecomando IR"], ["EUR 56,00"]),
+]
 
 _V, _A, _M = "VISSONIC · MODULI INPUT", "ARX · AUDIBOX", "MOGAMI · CAVI CAT5E"
 _P = "PAN Acoustic · FULL RANGE SPEAKER"
@@ -84,6 +90,7 @@ ATTESI = [
     AttesoCatalogo("P12-AMT", "Diffusore passivo Bass Reflex 12x3,5 woofer Peso 8,8kg", Decimal("3553.00"), 3, _P),
     AttesoCatalogo("P8-CX", "Diffusore coassiale Woofer 8 HQ Risposta 60Hz-22KHz", Decimal("2275.00"), 3, _P),
     AttesoCatalogo("PCX-WB", "Staffa a muro fissa", Decimal("185.00"), 3, _P),
+    AttesoCatalogo("CQ02-IR", "Kit telecomando IR", Decimal("56.00"), 4, _P, ("Marca mancante",), marca=""),
 ]
 
 
@@ -111,7 +118,7 @@ def _centrato(page, x_centro, y, testo, corpo=CORPO):
 def crea_catalogo(percorso: str | Path, linee: bool = True) -> Path:
     percorso = Path(percorso)
     doc = pymupdf.open()
-    for n, contenuto in enumerate(PAGINE + ([PAGINA_SCHEDE] if linee else []), 1):
+    for n, contenuto in enumerate(PAGINE + ([PAGINA_SCHEDE, PAGINA_SENZA_INTESTAZIONE] if linee else []), 1):
         page = doc.new_page(width=595.2, height=842)
         _centrato(page, 297, 22, "SUONO", 14)  # testata ripetuta
         _scrivi(page, 520, 820, str(n + 3), 9)  # numero di pagina

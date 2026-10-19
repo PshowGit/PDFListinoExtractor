@@ -38,6 +38,8 @@ def valida(articoli: list[Articolo], regole: dict | None = None) -> None:
         # le colonne di testo in piu' non hanno controlli: sono testo libero
         previsti = campi_mappati(normalizza(regole))
 
+    marca_prevista = any(c.get("campo") == "marca" for c in regole.get("colonne") or [])
+
     pagine_per_chiave: dict[str, list[int]] = defaultdict(list)
     for a in articoli:
         k = chiave_duplicato(a)
@@ -60,6 +62,8 @@ def valida(articoli: list[Articolo], regole: dict | None = None) -> None:
             an.append("Prezzo pari a zero — verificare")
         elif a.prezzo < 0 or a.prezzo > prezzo_massimo:
             an.append(f"Prezzo fuori scala: {a.prezzo}")
+        if marca_prevista and not str(a.valore("marca")).strip():
+            an.append("Marca mancante")
         if a.ean and not ean_valido(a.ean) and "ean" not in note:
             an.append(f"EAN non valido: «{a.ean}»")
         if _parentesi_sbilanciate(a.modello) or _parentesi_sbilanciate(a.descrizione):

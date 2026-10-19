@@ -9,12 +9,12 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
-from processors.models import COLONNE_STANDARD, TESTO_GENERICO, Articolo, ColonnaUscita
+from processors.models import COLONNE_STANDARD, MARCA, TESTO_GENERICO, Articolo, ColonnaUscita
 
-LARGHEZZE = {"modello": 30, "codice": 24, "ean": 16, "descrizione": 90, "prezzo": 14, TESTO_GENERICO: 24}
+LARGHEZZE = {"modello": 30, "codice": 24, "ean": 16, "descrizione": 90, "prezzo": 14, TESTO_GENERICO: 24, MARCA: 22}
 FORMATO_PREZZO = "#,##0.00"
 # testo: niente zeri iniziali persi, niente codici letti come numeri o date
-RUOLI_TESTO = {"modello", "codice", "ean", TESTO_GENERICO}
+RUOLI_TESTO = {"modello", "codice", "ean", TESTO_GENERICO, MARCA}
 
 
 class EsportazioneFallita(Exception):
