@@ -237,6 +237,46 @@ def _distanza(a: Riga, b: Riga) -> float:
     return max(0.0, max(a.y0, b.y0) - min(a.y1, b.y1))
 
 
+def dividi_per_prezzo(per_colonna: dict[int, list[Riga]], prezzi: list[Riga]) -> list[dict[int, list[Riga]]]:
+    """Le righe di un articolo divise in una fascia per prezzo, tagliando a meta' fra un prezzo e il successivo: il
+    testo di ogni voce e' centrato sulla sua riga (Etabeta pagina 122: le due righe di WP1-SP stanno una sopra e una
+    sotto il codice, e tagliando sulla riga del prezzo la prima finiva a WP1-SI).
+
+    Una colonna con righe in una fascia sola e' comune a tutte (la descrizione scritta una volta per due misure di
+    BAL-08, Etabeta pagina 257, o il codice di due varianti): si copia nelle fasce che non ne hanno.
+    """
+    ys = sorted(r.y0 for r in prezzi)
+    tagli = [(a + b) / 2 for a, b in itertools.pairwise(ys)]
+    fasce: list[dict[int, list[Riga]]] = [{} for _ in ys]
+    for n, righe in per_colonna.items():
+        for r in righe:
+            fasce[sum(1 for y in tagli if y <= r.y0)].setdefault(n, []).append(r)
+    for n in per_colonna:
+        con_righe = [f for f in fasce if f.get(n)]
+        if len(con_righe) == 1:
+            for f in fasce:
+                f.setdefault(n, list(con_righe[0][n]))
+    return fasce
+
+
+def sulla_riga_dei_dati(titolo: Riga, altre_colonne: list[Riga], stessa_colonna: list[Riga], prezzi: list[Riga],
+                        corpo: float) -> bool:
+    """Un testo appena piu' grande del testo sulla riga di un prezzo e dei dati di almeno due altre colonne, e senza
+    altro testo della sua.
+
+    Nel listino Midiware il codice «SOFBCA» e' in corpo 8 su un testo in corpo 6, sulla riga del suo nome, della
+    descrizione e dei quattro prezzi: preso per un titolo, diventava la categoria degli articoli seguenti e
+    fondeva l'articolo col successivo. Un titolo di sezione occupa invece una fascia sua. Stessa riga vuol dire
+    sovrapposta in altezza per almeno meta' della riga piu' bassa. Senza il prezzo e il limite sul corpo passava per
+    un codice «STUDIO», scritta grande accanto a testo promozionale (Etabeta, pagina 245).
+    """
+    def sulla_riga(r: Riga) -> bool:
+        return min(titolo.y1, r.y1) - max(titolo.y0, r.y0) >= 0.5 * min(titolo.y1 - titolo.y0, r.y1 - r.y0)
+
+    return (titolo.size <= CORPO_BOLLINO * corpo and any(map(sulla_riga, prezzi))
+            and sum(map(sulla_riga, altre_colonne)) >= 2 and not any(map(sulla_riga, stessa_colonna)))
+
+
 def a_fianco_dei_dati(titolo: Riga, righe_dati: list[Riga], righe_ancora: list[Riga], intestazioni: list[float],
                       corpo: float, passo: float, tolleranza: float) -> bool:
     """Un titolo che e' un bollino accanto a un articolo, non un titolo di sezione.

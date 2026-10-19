@@ -8,7 +8,7 @@ Per modificare un fornitore gia' salvato, `applica_profilo` riporta la sua mappa
 trovate nella pagina analizzata; al salvataggio `profilo` conserva le regole che il wizard non mostra.
 """
 from processors.analisi_layout import AnalisiLayout, ColonnaRilevata, pagine_con_tabella, profilo_da_analisi
-from processors.models import INTESTAZIONI, MARCA, TESTO_GENERICO
+from processors.models import ALTRO_PREZZO, INTESTAZIONI, MARCA, TESTO_GENERICO
 from processors.profilo import (
     CAMPI_ANCORA,
     REGEX_CODICE_PARENTESI,
@@ -28,6 +28,7 @@ ETICHETTE_CAMPO = {
     "identificativo": "Modello + Codice + EAN (impilati)",
     TESTO_GENERICO: "Testo (colonna in piu')",
     MARCA: "Marca (dall'intestazione)",
+    ALTRO_PREZZO: "Altro prezzo (colonna in piu')",
 }
 ETICHETTE_ANCORA = {
     "auto": "Automatica (per densità)",
@@ -47,6 +48,7 @@ COLORI_CAMPO = {
     "identificativo": "#FF7F0E",
     TESTO_GENERICO: "#17BECF",
     MARCA: "#E377C2",
+    ALTRO_PREZZO: "#FF9896",
 }
 
 
@@ -67,7 +69,7 @@ def prossima_tabella(analisi: AnalisiLayout, pagina: int) -> int | None:
 
 
 def campi_di(campo_colonna: str) -> set[str]:
-    if campo_colonna in (TESTO_GENERICO, MARCA):
+    if campo_colonna in (TESTO_GENERICO, MARCA, ALTRO_PREZZO):
         return set()  # non e' un campo del motore: non identifica l'articolo e non fa da ancora
     return {"modello", "codice", "ean"} if campo_colonna == "identificativo" else {campo_colonna}
 
@@ -77,13 +79,13 @@ def etichetta_proposta(col: ColonnaRilevata, campo: str) -> str:
 
     L'etichetta del PDF se e' il nome di quel campo («Articolo», «Listino»), altrimenti il nome standard:
     nel catalogo Etabeta sopra la descrizione c'e' il titolo della tabella, che cambia a ogni tabella.
-    Una colonna di testo prende la sua etichetta; una composita o ignorata non ha nome (le colonne
-    impilate escono coi nomi standard).
+    Una colonna di testo o un prezzo in piu' prende la sua etichetta; una composita o ignorata non ha nome
+    (le colonne impilate escono coi nomi standard).
     """
     if campo in ("ignora", "identificativo"):
         return ""
     etichetta = col.etichetta_completa or col.etichetta
-    if campo == TESTO_GENERICO:
+    if campo in (TESTO_GENERICO, ALTRO_PREZZO):
         return etichetta if col.da_intestazione else ""
     if col.da_intestazione and campo_da_intestazione(etichetta)[0] == campo:
         return etichetta
@@ -158,7 +160,7 @@ class ModelloWizard:
                 self.campi[i] = voce["campo"]
                 # senza un nome salvato vale quello standard: un profilo di prima esce come prima
                 self.etichette[i] = voce.get("etichetta") or (
-                    next(iter(voce.get("intestazioni") or []), "") if voce["campo"] == TESTO_GENERICO
+                    next(iter(voce.get("intestazioni") or []), "") if voce["campo"] in (TESTO_GENERICO, ALTRO_PREZZO)
                     else INTESTAZIONI.get(voce["campo"], ""))
         self.ancora = effettivo["ancora"] if effettivo["ancora"] in ETICHETTE_ANCORA else "auto"
         self.formato_prezzo = effettivo["formato_prezzo"]
@@ -215,7 +217,8 @@ class ModelloWizard:
             e.append(f"L'ancora «{ETICHETTE_ANCORA[self.ancora]}» non corrisponde a nessuna colonna associata.")
         for campo in ("descrizione", "prezzo"):
             if sum(1 for c in self.campi if c == campo) > 1:
-                e.append(f"Il campo {ETICHETTE_CAMPO[campo]} e' associato a piu' colonne: sceglierne una.")
+                altre = " e le altre come «Altro prezzo»" if campo == "prezzo" else ""
+                e.append(f"Il campo {ETICHETTE_CAMPO[campo]} e' associato a piu' colonne: sceglierne una{altre}.")
         if "identificativo" in self.campi and not self.codici_tra_parentesi:
             e.append("La colonna «Modello + Codice + EAN» richiede codici scritti tra parentesi: e' cio' che separa"
                      " il codice dal nome.")

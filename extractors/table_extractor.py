@@ -11,6 +11,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from processors.models import Span
+from processors.price_parser import sembra_prezzo
 from processors.profilo import campo_da_intestazione, normalizza_testo
 
 TITOLO, ESTERNO = "titolo", "esterno"
@@ -141,7 +142,12 @@ def e_ripetuta(riga: Riga, altezza: float, firme: set[tuple[int, str]]) -> bool:
 
 
 def _indice_colonna(testo: str, profilo: dict) -> int | None:
-    """Colonna del profilo riconosciuta da un'etichetta: prima le intestazioni dichiarate, poi i sinonimi."""
+    """Colonna del profilo riconosciuta da un'etichetta: prima le intestazioni dichiarate, poi i sinonimi.
+
+    Un prezzo non e' mai un'etichetta: «EUR 20,00» cominciava col sinonimo «eur», e una riga di dati con una
+    descrizione che conteneva «articolo» diventava un'intestazione (e i suoi valori la categoria)."""
+    if any(c.isdigit() for c in testo) and sembra_prezzo(testo):
+        return None
     t = normalizza_testo(testo)
     parole = set(t.split())
     for i, col in enumerate(profilo["colonne"]):
@@ -236,8 +242,9 @@ def _intestazione_da(righe_pagina, n, profilo, metr, larghezza):
     colonne.sort(key=lambda c: c.x)
     # categoria: le etichette che non sono il nome di un campo (marca, titolo della tabella), anche se il
     # profilo le ha salvate come intestazione della loro colonna; tranne il nome di una colonna di testo
-    # («Colore»), che e' un'etichetta fissa come le altre
-    di_testo = {id(s) for i, s in riconosciute.items() if profilo["colonne"][i]["campo"] == "testo_generico"}
+    # («Colore») o di un prezzo in piu' («Dealer»), che e' un'etichetta fissa come le altre
+    di_testo = {id(s) for i, s in riconosciute.items()
+                if profilo["colonne"][i]["campo"] in ("testo_generico", "altro_prezzo")}
     categoria = [s.testo for s in sorted(riga.spans, key=lambda s: s.x0)
                  if id(s) not in di_testo and campo_da_intestazione(s.testo, profilo.get("sinonimi"))[0] is None]
     intest = Intestazione(riga.y0, riga.y1, colonne, categoria)

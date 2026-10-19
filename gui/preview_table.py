@@ -12,14 +12,15 @@ from tkinter import messagebox, ttk
 import customtkinter as ctk
 
 from processors.data_validator import conta_tipi, tipo_anomalia, valida
-from processors.models import COLONNE_STANDARD, MARCA, TESTO_GENERICO, Articolo, ColonnaUscita
+from processors.models import ALTRO_PREZZO, COLONNE_STANDARD, MARCA, TESTO_GENERICO, Articolo, ColonnaUscita
 from processors.price_parser import formatta_prezzo, parse_prezzo
 from processors.profilo import colonne_uscita, normalizza
 
 # dopo le colonne del documento: non modificabili, non esportate
 FISSE = (ColonnaUscita("pagina", "Pag.", "pagina"), ColonnaUscita("note", "Anomalie", "note"))
 LARGHEZZE = {"modello": 170, "codice": 160, "ean": 110, "descrizione": 420, "prezzo": 90, TESTO_GENERICO: 140, MARCA: 130,
-             "pagina": 45, "note": 260}
+             ALTRO_PREZZO: 90, "pagina": 45, "note": 260}
+RUOLI_PREZZO = ("prezzo", ALTRO_PREZZO)
 # larghezza delle colonne dal contenuto: su quante righe misurarla e fra quali limiti, in pixel dello schermo
 CAMPIONE_LARGHEZZE, LARGHEZZA_MINIMA, LARGHEZZA_MASSIMA = 300, 50, 320
 SCRITTE_MISURATE = 5  # per colonna, le piu' lunghe del campione
@@ -27,11 +28,28 @@ SCRITTE_MISURATE = 5  # per colonna, le piu' lunghe del campione
 TUTTE, DA_VERIFICARE = None, "__da_verificare__"
 
 
+def _decimale(a: Articolo, col: ColonnaUscita) -> Decimal | None:
+    """Il valore di una colonna di prezzo; None se manca o non e' un prezzo riconoscibile."""
+    valore = a.prezzo if col.ruolo == "prezzo" else a.valore(col.chiave)
+    return valore if isinstance(valore, Decimal) else None
+
+
+def testo_cella(a: Articolo, col: ColonnaUscita) -> str:
+    """Il valore di una colonna come si mostra: i prezzi all'italiana, o il testo del PDF se non lo erano."""
+    if col.ruolo in RUOLI_PREZZO:
+        valore = _decimale(a, col)
+        if valore is not None:
+            return formatta_prezzo(valore)
+        return (a.prezzo_testo or "") if col.ruolo == "prezzo" else str(a.valore(col.chiave) or "")
+    return str(a.valore(col.chiave) or "").replace("\n", " ")
+
+
 def _chiave_ordinamento(col: ColonnaUscita):
     def chiave(a: Articolo):
-        if col.ruolo == "prezzo":
+        if col.ruolo in RUOLI_PREZZO:
             # i prezzi mancanti in fondo, qualunque sia il verso
-            return (a.prezzo is None, a.prezzo if a.prezzo is not None else Decimal(0))
+            valore = _decimale(a, col)
+            return (valore is None, valore if valore is not None else Decimal(0))
         if col.ruolo == "pagina":
             return (a.pagina, a.bbox[1])
         if col.ruolo == "note":
@@ -124,7 +142,7 @@ class PreviewTable(ctk.CTkFrame):
             self.tree.column(
                 c.chiave,
                 width=LARGHEZZE[c.ruolo],
-                anchor="e" if c.ruolo in ("prezzo", "pagina") else "w",
+                anchor="e" if c.ruolo in (*RUOLI_PREZZO, "pagina") else "w",
                 stretch=c.ruolo in ("descrizione", "note"),
             )
         self._intestazioni()
@@ -222,12 +240,7 @@ class PreviewTable(ctk.CTkFrame):
     # --- vista ------------------------------------------------------------------------------
 
     def _valori(self, a: Articolo) -> tuple:
-        def testo(c: ColonnaUscita):
-            if c.ruolo == "prezzo":
-                return formatta_prezzo(a.prezzo) if a.prezzo is not None else (a.prezzo_testo or "")
-            return str(a.valore(c.chiave) or "").replace("\n", " ")
-
-        return (*(testo(c) for c in self.colonne), a.pagina, "; ".join(a.tutte_le_anomalie()))
+        return (*(testo_cella(a, c) for c in self.colonne), a.pagina, "; ".join(a.tutte_le_anomalie()))
 
     def _ridisegna(self) -> None:
         selezione = set(self.tree.selection())
@@ -276,8 +289,8 @@ class PreviewTable(ctk.CTkFrame):
         discendente = self._verso.get(campo, False)
         chiave = _chiave_ordinamento(col)
         self._ordine.sort(key=lambda i: chiave(self._articoli[i]), reverse=discendente)
-        if col.ruolo == "prezzo" and discendente:  # tieni comunque i mancanti in fondo
-            self._ordine.sort(key=lambda i: self._articoli[i].prezzo is None)
+        if col.ruolo in RUOLI_PREZZO and discendente:  # tieni comunque i mancanti in fondo
+            self._ordine.sort(key=lambda i: _decimale(self._articoli[i], col) is None)
         self._verso[campo] = not discendente
         self._ordinata = (campo, discendente)
         self._intestazioni()
@@ -313,6 +326,12 @@ class PreviewTable(ctk.CTkFrame):
                     return False
                 a.imposta("prezzo", esito.valore)
                 a.prezzo_testo = testo
+        elif self._colonna(campo).ruolo == ALTRO_PREZZO:
+            testo = testo.strip()
+            esito = parse_prezzo(testo, self.regole.get("formato_prezzo", "auto")) if testo else None
+            if esito is not None and esito.valore is None:
+                return False
+            a.imposta(campo, esito.valore if esito is not None else "")
         else:
             a.imposta(campo, testo.strip())
         self._dopo_modifica()
@@ -388,12 +407,17 @@ class PreviewTable(ctk.CTkFrame):
         # una riga fuori vista (o la tabella non ancora disegnata) non ha riquadro: l'editor va in alto
         x, y, w, h = self.tree.bbox(iid, f"#{indice + 1}") or (0, 0, 120, 24)
         a = self._articoli[iid]
-        prezzo = self._colonna(campo).ruolo == "prezzo"
-        iniziale = formatta_prezzo(a.prezzo) if prezzo and a.prezzo is not None else (
-            a.prezzo_testo if prezzo else a.valore(campo)
-        )
-        entry = tk.Entry(self.tree)
-        entry.insert(0, iniziale)
+        di_prezzo = self._colonna(campo).ruolo in RUOLI_PREZZO
+        iniziale = testo_cella(a, self._colonna(campo)) if di_prezzo else a.valore(campo)
+        # piu' prezzi trovati per lo stesso articolo («€ 250,00 | € 290,00»): si sceglie da un menu, o si scrive
+        scelte = [p.strip() for p in str(iniziale).split(" | ")] if di_prezzo and " | " in str(iniziale) else []
+        if scelte:
+            entry = ttk.Combobox(self.tree, values=scelte)
+            entry.set(scelte[0])
+            entry.bind("<<ComboboxSelected>>", lambda e: self._ferma(self.conferma_editor("giu")))
+        else:
+            entry = tk.Entry(self.tree)
+            entry.insert(0, iniziale)
         entry.select_range(0, "end")
         entry.place(x=x, y=y, width=max(w, 120), height=h)
         entry.focus_set()
@@ -405,7 +429,7 @@ class PreviewTable(ctk.CTkFrame):
         entry.bind("<Tab>", lambda e: self._ferma(self.conferma_editor("destra")))
         entry.bind("<Shift-Tab>", lambda e: self._ferma(self.conferma_editor("sinistra")))
         entry.bind("<Escape>", lambda e: self._ferma(self.annulla_editor()))
-        entry.bind("<FocusOut>", lambda e: self._chiudi_editor())
+        entry.bind("<FocusOut>", lambda e: self._fuori_dall_editor())
 
     def conferma_editor(self, dopo: str | None = None) -> bool:
         """Applica il valore dell'editor; poi `dopo` = "giu", "destra" o "sinistra" dice dove proseguire.
@@ -421,7 +445,7 @@ class PreviewTable(ctk.CTkFrame):
         if not self.modifica_campo(iid, self.colonne[indice].chiave, valore):
             messagebox.showerror("Prezzo non valido", f"«{valore}» non e' un prezzo riconoscibile.", parent=self)
             if self._editor is not None:
-                self._editor.bind("<FocusOut>", lambda e: self._chiudi_editor())
+                self._editor.bind("<FocusOut>", lambda e: self._fuori_dall_editor())
                 self._editor.focus_set()
             return False
         self._chiudi_editor()
@@ -442,6 +466,24 @@ class PreviewTable(ctk.CTkFrame):
     def annulla_editor(self) -> None:
         self._chiudi_editor()
         self.tree.focus_set()
+
+    def _fuori_dall_editor(self):
+        """Il fuoco ha lasciato l'editor: si chiude, tranne quando e' passato alla tendina del menu dei prezzi,
+        che e' una finestra a parte e altrimenti si chiudeva prima di poter scegliere."""
+        editor = self._editor
+
+        def controlla():
+            try:
+                fuoco = self.focus_get()
+            except (KeyError, tk.TclError):  # Tk non sa nominare la tendina del Combobox: e' aperta
+                return
+            if self._editor is editor and editor is not None and not str(fuoco or "").startswith(str(editor)):
+                self._chiudi_editor()
+
+        if isinstance(editor, ttk.Combobox):
+            self.after(150, controlla)
+        else:
+            self._chiudi_editor()
 
     def _chiudi_editor(self):
         if self._editor is not None:

@@ -3,15 +3,17 @@
 Le colonne arrivano dall'estrazione (`RisultatoEstrazione.colonne`): nome e ordine li decide il profilo,
 il formato il ruolo. Senza colonne valgono le cinque standard, come prima delle colonne dinamiche.
 """
+from decimal import Decimal
 from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
-from processors.models import COLONNE_STANDARD, MARCA, TESTO_GENERICO, Articolo, ColonnaUscita
+from processors.models import ALTRO_PREZZO, COLONNE_STANDARD, MARCA, TESTO_GENERICO, Articolo, ColonnaUscita
 
-LARGHEZZE = {"modello": 30, "codice": 24, "ean": 16, "descrizione": 90, "prezzo": 14, TESTO_GENERICO: 24, MARCA: 22}
+LARGHEZZE = {"modello": 30, "codice": 24, "ean": 16, "descrizione": 90, "prezzo": 14, TESTO_GENERICO: 24, MARCA: 22,
+             ALTRO_PREZZO: 14}
 FORMATO_PREZZO = "#,##0.00"
 # testo: niente zeri iniziali persi, niente codici letti come numeri o date
 RUOLI_TESTO = {"modello", "codice", "ean", TESTO_GENERICO, MARCA}
@@ -35,7 +37,11 @@ def _salva(wb: Workbook, percorso: Path) -> None:
 def _cella(a: Articolo, col: ColonnaUscita):
     if col.ruolo == "prezzo":
         return float(a.prezzo) if a.prezzo is not None else None  # mancante: cella vuota, non 0
-    return a.valore(col.chiave)
+    valore = a.valore(col.chiave)
+    if col.ruolo == ALTRO_PREZZO:
+        # un numero; il testo del PDF se non era un prezzo riconoscibile (segnalato fra le anomalie)
+        return float(valore) if isinstance(valore, Decimal) else (valore or None)
+    return valore
 
 
 def esporta_listino(articoli: list[Articolo], percorso: str | Path,
@@ -60,7 +66,7 @@ def esporta_listino(articoli: list[Articolo], percorso: str | Path,
         for cella, col in zip(riga, colonne, strict=True):
             if col.ruolo in RUOLI_TESTO:
                 cella.number_format = "@"
-            elif col.ruolo == "prezzo":
+            elif col.ruolo in ("prezzo", ALTRO_PREZZO):
                 cella.number_format = FORMATO_PREZZO
             cella.alignment = Alignment(wrap_text=col.ruolo == "descrizione", vertical="top")
 

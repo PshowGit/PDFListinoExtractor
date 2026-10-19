@@ -15,6 +15,9 @@ INTESTAZIONI = {
 TESTO_GENERICO = "testo_generico"  # ruolo di una colonna in piu' (colore, note...): solo testo
 # ruolo della colonna sopra cui l'intestazione di ogni tabella scrive la marca (catalogo Etabeta)
 MARCA = "marca"
+# ruolo di un prezzo in piu' (Midiware: Listino, Dealer, Premium, Street): un numero, ma non il prezzo
+# dell'articolo, che resta uno solo e decide ancora e controlli
+ALTRO_PREZZO = "altro_prezzo"
 
 
 @dataclass(frozen=True)
@@ -22,8 +25,8 @@ class ColonnaUscita:
     """Una colonna della tabella e del foglio "Listino": quali e in che ordine le decide il profilo.
 
     `chiave` e' il nome del campo per i cinque standard e "testo_1", "testo_2"... per le colonne di
-    testo; `etichetta` e' il nome mostrato ed esportato; `ruolo` dice al motore e all'export come
-    trattarla (uno dei CAMPI o TESTO_GENERICO).
+    testo, "prezzo_1"... per i prezzi in piu'; `etichetta` e' il nome mostrato ed esportato; `ruolo` dice al
+    motore e all'export come trattarla (uno dei CAMPI, TESTO_GENERICO, MARCA o ALTRO_PREZZO).
     """
 
     chiave: str
@@ -79,8 +82,9 @@ class Articolo:
     note_estrazione: dict[str, str] = field(default_factory=dict)
     # Anomalie del validatore: ricalcolate da zero a ogni validazione.
     anomalie: list[str] = field(default_factory=list)
-    # Valori delle colonne di testo in piu', per chiave ("testo_1"...): i cinque campi restano attributi.
-    altri: dict[str, str] = field(default_factory=dict)
+    # Valori delle colonne in piu', per chiave ("testo_1", "marca", "prezzo_1"...): i cinque campi restano
+    # attributi. Un prezzo in piu' e' un Decimal, o il testo del PDF se non e' un prezzo riconoscibile.
+    altri: dict[str, str | Decimal] = field(default_factory=dict)
 
     def tutte_le_anomalie(self) -> list[str]:
         return list(self.note_estrazione.values()) + self.anomalie

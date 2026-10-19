@@ -243,6 +243,30 @@ def test_wizard_dalla_pdf_al_fornitore_salvato(radice, tmp_path, monkeypatch):
     assert config.elenco_fornitori()["acme_audio"] == "ACME Audio"
 
 
+def test_wizard_in_primo_piano_con_le_colonne_compatte(radice, tmp_path):
+    from gui.wizard_fornitore import WizardFornitore
+    from tests.sintetico_generico import crea_listino_colonne
+
+    w = WizardFornitore(radice, {}, pdf=crea_listino_colonne(tmp_path / "prezzi.pdf", "prezzi"))
+    try:
+        # davanti alla finestra principale: su Windows un CTkToplevel appena aperto finiva dietro
+        assert w.attributes("-topmost") == 1
+        _attendi(radice, lambda: w.modello is not None)
+        assert w.lbl_colonne.cget("text") == "Colonne rilevate (5)"
+        assert [m.get() for m in w._menu_colonne] == [
+            "Codice", "Descrizione", "Prezzo", "Altro prezzo (colonna in piu')", "Altro prezzo (colonna in piu')"]
+        # ancora, formato e parentesi richiusi, coi valori riassunti; si aprono da soli se l'errore e' li'
+        assert not w._opzioni_aperte and not w._riquadro_opzioni.grid_info()
+        assert "Altre opzioni: ancora Codice" in w.btn_opzioni.cget("text")
+        w.modello.ancora = "ean"
+        w._mostra_errori()
+        assert w._opzioni_aperte and w._riquadro_opzioni.grid_info()
+        w.mostra_opzioni_avanzate(False)
+        assert not w._riquadro_opzioni.grid_info() and w.btn_opzioni.cget("text").startswith("▸")
+    finally:
+        w.chiudi()
+
+
 def test_wizard_disegna_l_anteprima_sulla_pagina(radice, tmp_path):
     from gui.wizard_fornitore import WizardFornitore
     from tests.sintetico_catalogo import crea_catalogo
@@ -493,7 +517,7 @@ def test_tabella_con_le_colonne_dell_estrazione(radice):
     assert a.anomalie == ["Prezzo mancante"]  # anomalie ricalcolate: il profilo prevede il prezzo
 
 
-@pytest.mark.parametrize("variante", ["tre", "colore"])
+@pytest.mark.parametrize("variante", ["tre", "colore", "prezzi"])
 def test_colonne_dinamiche_dal_pdf_all_excel(radice, tmp_path, variante):
     # tutto il percorso: proposta del wizard, profilo, estrazione, tabella, foglio "Listino"
     from exporters.excel_exporter import esporta_listino
@@ -524,8 +548,54 @@ def test_colonne_dinamiche_dal_pdf_all_excel(radice, tmp_path, variante):
     assert [list(r) for r in ws.iter_rows(min_row=2, values_only=True)] == righe
     if variante == "tre":
         assert not {"Codice", "EAN"} & set(intestazioni)
-    else:
+    elif variante == "colore":
         assert ws.cell(2, intestazioni.index("Colour") + 1).number_format == "@"
+    else:
+        # i prezzi in piu' sono numeri come il prezzo, e la tabella li mostra all'italiana
+        assert ws.cell(2, intestazioni.index("Dealer") + 1).number_format == "#,##0.00"
+        assert t._valori(t.articoli()[1])[3] == "949,00"
+
+
+def test_prezzo_in_piu_si_corregge_e_si_ordina_come_un_prezzo(radice):
+    from gui.preview_table import PreviewTable
+    from processors.models import Articolo, ColonnaUscita
+
+    colonne = [ColonnaUscita("codice", "Codice", "codice"), ColonnaUscita("prezzo_1", "Dealer", "altro_prezzo")]
+    profilo = {"formato_prezzo": "it"}
+    articoli = [Articolo(codice="A", altri={"prezzo_1": Decimal("90.00")}),
+                Articolo(codice="B", altri={"prezzo_1": "Chiedere"}, note_estrazione={"prezzo_1": "Prezzo non riconosciuto"}),
+                Articolo(codice="C", altri={"prezzo_1": Decimal("1200.00")})]
+    t = PreviewTable(radice, profilo)
+    t.carica(articoli, colonne)
+    assert [t._valori(a)[1] for a in articoli] == ["90,00", "Chiedere", "1.200,00"]
+    t.ordina("prezzo_1")
+    assert [a.codice for a in t.articoli()] == ["A", "C", "B"]  # quello non riconosciuto in fondo
+    t.ordina("prezzo_1")
+    assert [a.codice for a in t.articoli()] == ["C", "A", "B"]
+    iid = t.iid_di(articoli[1])
+    assert not t.modifica_campo(iid, "prezzo_1", "a richiesta")
+    assert t.modifica_campo(iid, "prezzo_1", "1.050,50")
+    assert articoli[1].altri["prezzo_1"] == Decimal("1050.50") and "prezzo_1" not in articoli[1].note_estrazione
+    assert t.modifica_campo(iid, "prezzo_1", "")
+    assert articoli[1].altri["prezzo_1"] == ""
+
+
+def test_piu_prezzi_trovati_si_scelgono_da_un_menu(radice):
+    from tkinter import ttk
+
+    from gui.preview_table import PreviewTable
+    from processors.models import Articolo, ColonnaUscita
+
+    a = Articolo(codice="ACT-6", prezzo_testo="€ 250,00 | € 290,00",
+                 note_estrazione={"prezzo": "Piu' prezzi per lo stesso articolo (€ 250,00 | € 290,00)"})
+    t = PreviewTable(radice, {"formato_prezzo": "it"})
+    t.carica([a], [ColonnaUscita("codice", "Codice", "codice"), ColonnaUscita("prezzo", "Listino", "prezzo")])
+    t.modifica(t.iid_di(a), 1)
+    assert isinstance(t._editor, ttk.Combobox)
+    assert list(t._editor.cget("values")) == ["€ 250,00", "€ 290,00"] and t._editor.get() == "€ 250,00"
+    t._editor.set("€ 290,00")
+    assert t.conferma_editor()
+    assert a.prezzo == Decimal("290.00") and "prezzo" not in a.note_estrazione
 
 
 def test_menu_del_filtro_coi_contatori(radice, tmp_path, monkeypatch, pdf_sintetico, regole):

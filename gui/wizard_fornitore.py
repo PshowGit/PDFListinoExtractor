@@ -19,6 +19,7 @@ import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageTk
 
 import config
+from gui.dialoghi import in_primo_piano
 from gui.lavoro import LavoroInProcesso
 from gui.pannelli import pannello_diviso
 from gui.preview_table import PreviewTable
@@ -44,6 +45,8 @@ COLORE_TITOLO, COLORE_BOLLINO = "#E53935", "#757575"
 # altezza minima di pagina e mappatura sopra l'anteprima: opzioni e pulsanti ne occupano circa 330, e l'elenco
 # delle colonne deve restare visibile
 MINIMO_SOPRA = 440
+# larghezza del pannello delle colonne e dei suoi menu: ci sta «Modello + Codice + EAN (impilati)» per intero
+LARGHEZZA_MAPPATURA, LARGHEZZA_RUOLO = 480, 220
 
 
 def _chiave_per_etichetta(tabella: dict[str, str], etichetta: str) -> str:
@@ -110,7 +113,7 @@ class WizardFornitore(ctk.CTkToplevel):
         mappatura = self._pannello_mappatura()
         anteprima = self._area_anteprima()
         self._sopra.add(cornice, minsize=300, stretch="always")
-        self._sopra.add(mappatura, minsize=380, width=430, stretch="never")
+        self._sopra.add(mappatura, minsize=420, width=LARGHEZZA_MAPPATURA, stretch="never")
         self._corpo.add(self._sopra, minsize=MINIMO_SOPRA, stretch="always")
         self._corpo.add(anteprima, minsize=110, height=230, stretch="never")
         self.lbl_stato = ctk.CTkLabel(self, anchor="w", text=(
@@ -120,6 +123,7 @@ class WizardFornitore(ctk.CTkToplevel):
         self.lbl_stato.grid(row=2, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
         self.protocol("WM_DELETE_WINDOW", self.chiudi)
         self._aggiorna_comandi()
+        in_primo_piano(self)
         if pdf is not None:
             self.pdf = Path(pdf)
             self.after(200, self._analizza)
@@ -181,19 +185,27 @@ class WizardFornitore(ctk.CTkToplevel):
         return cornice
 
     def _pannello_mappatura(self):
-        p = ctk.CTkFrame(self._sopra, width=430)
+        p = ctk.CTkFrame(self._sopra, width=LARGHEZZA_MAPPATURA)
         p.grid_propagate(False)
         p.grid_columnconfigure(0, weight=1)
         p.grid_rowconfigure(1, weight=1)
-        ctk.CTkLabel(p, text="Colonne rilevate", font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, sticky="w", padx=10, pady=(8, 2)
-        )
+        testata = ctk.CTkFrame(p, fg_color="transparent")
+        testata.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 0))
+        self.lbl_colonne = ctk.CTkLabel(testata, text="Colonne rilevate", font=ctk.CTkFont(weight="bold"))
+        self.lbl_colonne.pack(side="left")
+        ctk.CTkLabel(testata, text="ruolo · nome nell'Excel", text_color="gray", font=ctk.CTkFont(size=11)).pack(
+            side="right")
         self.elenco_colonne = ctk.CTkScrollableFrame(p)
         self.elenco_colonne.grid(row=1, column=0, sticky="nsew", padx=6, pady=4)
         self.elenco_colonne.grid_columnconfigure(0, weight=1)
 
-        o = ctk.CTkFrame(p, fg_color="transparent")
-        o.grid(row=2, column=0, sticky="ew", padx=8, pady=4)
+        # ancora, formato e parentesi si cambiano di rado: richiusi lasciano spazio all'elenco delle colonne
+        self.btn_opzioni = ctk.CTkButton(p, text="", height=24, fg_color="transparent", anchor="w",
+                                         text_color=("gray10", "gray90"), hover_color=("gray80", "gray30"),
+                                         command=lambda: self.mostra_opzioni_avanzate(not self._opzioni_aperte))
+        self.btn_opzioni.grid(row=2, column=0, sticky="ew", padx=6)
+        self._opzioni_aperte = False
+        o = self._riquadro_opzioni = ctk.CTkFrame(p, fg_color="transparent")
         o.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(o, text="Ancora").grid(row=0, column=0, sticky="w", pady=3)
         self.menu_ancora = ctk.CTkOptionMenu(o, values=list(ETICHETTE_ANCORA.values()), command=self._cambia_ancora)
@@ -207,15 +219,21 @@ class WizardFornitore(ctk.CTkToplevel):
         self.chk_parentesi_excel.grid(row=3, column=0, columnspan=2, sticky="w", pady=3)
         self.chk_linee = ctk.CTkCheckBox(o, text="Usa le linee orizzontali come separatori", command=self._opzioni)
         self.chk_linee.grid(row=4, column=0, columnspan=2, sticky="w", pady=3)
-        ctk.CTkLabel(o, text="Nome").grid(row=5, column=0, sticky="w", pady=(10, 3))
-        self.ent_nome = ctk.CTkEntry(o, placeholder_text="es. Fornitore X - listino 2026")
-        self.ent_nome.grid(row=5, column=1, sticky="ew", pady=(10, 3))
+        self.mostra_opzioni_avanzate(False)
+
+        n = ctk.CTkFrame(p, fg_color="transparent")
+        n.grid(row=4, column=0, sticky="ew", padx=8, pady=(6, 2))
+        n.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(n, text="Nome").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.ent_nome = ctk.CTkEntry(n, placeholder_text="es. Fornitore X - listino 2026")
+        self.ent_nome.grid(row=0, column=1, sticky="ew")
         self.ent_nome.bind("<KeyRelease>", lambda e: self._opzioni())
 
-        self.lbl_errori = ctk.CTkLabel(p, text="", text_color="#C0392B", anchor="w", justify="left", wraplength=400)
-        self.lbl_errori.grid(row=3, column=0, sticky="ew", padx=10, pady=4)
+        self.lbl_errori = ctk.CTkLabel(p, text="", text_color="#C0392B", anchor="w", justify="left",
+                                       wraplength=LARGHEZZA_MAPPATURA - 30)
+        self.lbl_errori.grid(row=5, column=0, sticky="ew", padx=10, pady=2)
         b = ctk.CTkFrame(p, fg_color="transparent")
-        b.grid(row=4, column=0, sticky="ew", padx=8, pady=(4, 10))
+        b.grid(row=6, column=0, sticky="ew", padx=8, pady=(4, 10))
         self.btn_anteprima = ctk.CTkButton(b, text="Anteprima pagina", command=self._anteprima)
         self.btn_anteprima.pack(side="left", expand=True, fill="x", padx=(0, 4))
         self.btn_salva = ctk.CTkButton(b, text="Salva modifiche" if self.modifica else "Salva fornitore",
@@ -351,34 +369,57 @@ class WizardFornitore(ctk.CTkToplevel):
     # --- mappatura ----------------------------------------------------------------------------
 
     def _costruisci_colonne(self):
+        """Una riga compatta per colonna: colore del ruolo, numero ed etichetta, esempi; a destra ruolo e nome.
+
+        Prima ogni colonna occupava un riquadro alto 80 pixel con menu stretti: sul listino Midiware (sette colonne)
+        se ne vedevano due e mezza, e voci come «Altro prezzo (colonna in piu')» erano tagliate."""
         for w in self.elenco_colonne.winfo_children():
             w.destroy()
         self._riquadri, self._menu_colonne, self._nomi_colonne, self._selezionata = [], [], [], None
-        for i, col in enumerate(self.modello.analisi.colonne):
-            r = ctk.CTkFrame(self.elenco_colonne, border_width=2, border_color="#D0D0D0")
-            r.grid(row=i, column=0, sticky="ew", padx=2, pady=3)
+        colonne = self.modello.analisi.colonne
+        self.lbl_colonne.configure(text=f"Colonne rilevate ({len(colonne)})")
+        for i, col in enumerate(colonne):
+            r = ctk.CTkFrame(self.elenco_colonne, border_width=1, border_color="#D0D0D0", corner_radius=6)
+            r.grid(row=i, column=0, sticky="ew", padx=2, pady=2)
             r.grid_columnconfigure(1, weight=1)
-            campione = ctk.CTkLabel(r, text="", width=14, height=40, corner_radius=4,
+            campione = ctk.CTkLabel(r, text="", width=8, height=30, corner_radius=3,
                                     fg_color=COLORI_CAMPO[self.modello.campi[i]])
-            campione.grid(row=0, column=0, rowspan=2, padx=(6, 8), pady=6)
-            titolo = f"{i + 1}. «{col.etichetta}»" if col.da_intestazione else f"{i + 1}. {col.etichetta}"
-            ctk.CTkLabel(r, text=titolo, anchor="w", font=ctk.CTkFont(weight="bold")).grid(
-                row=0, column=1, sticky="ew", pady=(6, 0)
-            )
-            esempi = f"x≈{col.x0:.0f} · " + (" · ".join(e[:40] for e in col.esempi[:3]) or "nessun testo qui")
-            ctk.CTkLabel(r, text=esempi, anchor="w", justify="left", text_color="gray", wraplength=230,
-                         font=ctk.CTkFont(size=11)).grid(row=1, column=1, sticky="ew", pady=(0, 6))
-            menu = ctk.CTkOptionMenu(r, values=list(ETICHETTE_CAMPO.values()), width=150,
+            campione.grid(row=0, column=0, rowspan=2, padx=(5, 6), pady=4, sticky="ns")
+            etichetta = col.etichetta if len(col.etichetta) <= 22 else col.etichetta[:21] + "…"
+            titolo = f"{i + 1}. «{etichetta}»" if col.da_intestazione else f"{i + 1}. {etichetta}"
+            ctk.CTkLabel(r, text=titolo, anchor="w", height=20, font=ctk.CTkFont(weight="bold")).grid(
+                row=0, column=1, sticky="ew", pady=(3, 0))
+            esempi = " · ".join(e[:24] for e in col.esempi[:2]) or "nessun testo qui"
+            esempi = esempi if len(esempi) <= 34 else esempi[:33] + "…"
+            ctk.CTkLabel(r, text=esempi, anchor="w", height=16, text_color="gray",
+                         font=ctk.CTkFont(size=11)).grid(row=1, column=1, sticky="ew", pady=(0, 3))
+            menu = ctk.CTkOptionMenu(r, values=list(ETICHETTE_CAMPO.values()), width=LARGHEZZA_RUOLO, height=24,
+                                     dynamic_resizing=False,
                                      command=lambda etichetta, i=i, c=campione: self._cambia_campo(i, etichetta, c))
             menu.set(ETICHETTE_CAMPO[self.modello.campi[i]])
-            menu.grid(row=0, column=2, padx=6, pady=(6, 2))
-            nome = ctk.CTkEntry(r, width=150, placeholder_text="nome della colonna")
-            nome.grid(row=1, column=2, padx=6, pady=(0, 6))
+            menu.grid(row=0, column=2, padx=(4, 5), pady=(4, 1))
+            nome = ctk.CTkEntry(r, width=LARGHEZZA_RUOLO, height=24, placeholder_text="nome nell'Excel")
+            nome.grid(row=1, column=2, padx=(4, 5), pady=(1, 4))
             nome.bind("<KeyRelease>", lambda e, i=i, w=nome: self.modello.imposta_etichetta(i, w.get()))
+            for w in (r, *r.winfo_children()[:3]):  # un clic sulla riga la evidenzia anche sulla pagina
+                w.bind("<Button-1>", lambda e, i=i: self.seleziona_colonna(i))
             self._riquadri.append(r)
             self._menu_colonne.append(menu)
             self._nomi_colonne.append(nome)
             self._mostra_nome(i)
+
+    def mostra_opzioni_avanzate(self, aperte: bool) -> None:
+        """Apre o richiude ancora, formato dei prezzi e parentesi; richiuse, il pulsante ne riassume i valori."""
+        self._opzioni_aperte = aperte
+        if aperte:
+            self._riquadro_opzioni.grid(row=3, column=0, sticky="ew", padx=14, pady=(0, 2))
+        else:
+            self._riquadro_opzioni.grid_remove()
+        riassunto = ""
+        if self.modello is not None:
+            riassunto = (f": ancora {ETICHETTE_ANCORA[self.modello.ancora].split(' (')[0]} · prezzi "
+                         f"{ETICHETTE_FORMATO[self.modello.formato_prezzo].split(' (')[0]}")
+        self.btn_opzioni.configure(text=("▾ " if aperte else "▸ ") + "Altre opzioni" + riassunto)
 
     def _mostra_opzioni(self):
         m = self.modello
@@ -389,6 +430,7 @@ class WizardFornitore(ctk.CTkToplevel):
             chk.select() if valore else chk.deselect()
         if m.nome and not self.ent_nome.get():
             self.ent_nome.insert(0, m.nome)
+        self.mostra_opzioni_avanzate(self._opzioni_aperte)
         self._mostra_errori()
 
     def imposta_campo(self, indice: int, campo: str) -> None:
@@ -421,11 +463,13 @@ class WizardFornitore(ctk.CTkToplevel):
     def _cambia_ancora(self, etichetta: str):
         if self.modello:
             self.modello.ancora = _chiave_per_etichetta(ETICHETTE_ANCORA, etichetta)
+            self.mostra_opzioni_avanzate(self._opzioni_aperte)
             self._mostra_errori()
 
     def _cambia_formato(self, etichetta: str):
         if self.modello:
             self.modello.formato_prezzo = _chiave_per_etichetta(ETICHETTE_FORMATO, etichetta)
+            self.mostra_opzioni_avanzate(self._opzioni_aperte)
 
     def _opzioni(self):
         if not self.modello:
@@ -441,6 +485,8 @@ class WizardFornitore(ctk.CTkToplevel):
         if not includi_nome:
             errori = [e for e in errori if "nome" not in e.lower()]
         self.lbl_errori.configure(text="\n".join(f"• {e}" for e in errori))
+        if any("ancora" in e.lower() or "parentesi" in e.lower() for e in errori) and not self._opzioni_aperte:
+            self.mostra_opzioni_avanzate(True)  # l'errore riguarda un'opzione richiusa: la si fa vedere
         return errori
 
     # --- disegno della pagina -----------------------------------------------------------------
@@ -465,8 +511,10 @@ class WizardFornitore(ctk.CTkToplevel):
             x0, x1 = col.x0 * scala, col.x1 * scala
             d.rectangle((x0, alto * scala, x1, img.height - 1), fill=_rgba(colore, 0 if campo == "ignora" else 38),
                         outline=_rgba(colore, 255), width=3 if i == self._selezionata else 1)
-            d.rectangle((x0, alto * scala, x0 + 22, alto * scala + 16), fill=_rgba(colore, 255))
-            d.text((x0 + 6, alto * scala + 2), str(i + 1), fill="white")
+            # il numero sopra l'intestazione, non sopra la sua etichetta: la copriva («Codice» diventava «e»)
+            y = max(0.0, alto * scala - 17)
+            d.rectangle((x0, y, x0 + 22, y + 16), fill=_rgba(colore, 255))
+            d.text((x0 + 6, y + 2), str(i + 1), fill="white")
         # tutte le intestazioni della pagina, una per tabella (dall'anteprima, se c'e': sono quelle del profilo)
         intestazioni = self._geometria.intestazioni if self._geometria else (
             a.intestazioni or ([a.intestazione] if a.intestazione else []))

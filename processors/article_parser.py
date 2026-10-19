@@ -18,6 +18,7 @@ from extractors.table_extractor import (
     Metriche,
     Riga,
     allinea_al_contenuto,
+    assegna_colonna,
     colonna_di,
     e_ripetuta,
     firme_ripetute,
@@ -28,11 +29,12 @@ from extractors.table_extractor import (
 )
 from processors import raggruppamento
 from processors.data_validator import ean_valido
-from processors.models import CAMPI, MARCA, TESTO_GENERICO, Articolo, GeometriaPagina, Span
+from processors.models import ALTRO_PREZZO, CAMPI, MARCA, TESTO_GENERICO, Articolo, GeometriaPagina, Span
 from processors.price_parser import RisultatoPrezzo, parse_prezzo
 from processors.profilo import CAMPI_ANCORA, CONTIENE_PREDEFINITO, chiavi_testo, normalizza, normalizza_testo
 
 _SPAZI = re.compile(r"\s+")
+_SEGNO_VARIAZIONE = re.compile(r"(?<=\d)\s+[+\-–]$")
 # il campo d'ancoraggio deve coprire almeno questa quota delle righe del campo piu' denso
 QUOTA_DENSITA_ANCORA = 0.6
 # se almeno questa quota delle righe della colonna Modello ha l'aspetto di un codice, l'ancora
@@ -364,11 +366,14 @@ class ParserListino:
             ancore = [r for r in t.righe.get(n_ancora, []) if self._e_ancora(r, self.ancora, t.colonne[n_ancora])]
             t.titoli = [r for r in t.titoli if not raggruppamento.a_fianco_dei_dati(
                 r, dati, ancore, [i.y0 for i in intest], self.metr.corpo, self.passo_ancora, tol)]
+            ancore_ingrandite = self._ancore_ingrandite(t, n_ancora)
+        else:
+            ancore_ingrandite = set()
         if self.geometrie is not None:
             def riquadro(r):
                 return (r.x0, r.y0, r.x1, r.y1, _pulito(r.testo))
 
-            rimasti = {id(r) for r in t.titoli}
+            rimasti = {id(r) for r in t.titoli} | ancore_ingrandite  # le ancore spostate non sono bollini
             self.geometrie[pagina] = GeometriaPagina(
                 [(i.y0, i.y1) for i in intest], [riquadro(r) for r in t.titoli],
                 [riquadro(r) for r in titoli_trovati if id(r) not in rimasti])
@@ -469,16 +474,82 @@ class ParserListino:
             if marca:
                 self.marca = marca[-1]
             per_colonna = {n: sorted(v, key=lambda r: r.y0) for n, v in per_articolo[k].items()}
-            art = self._articolo(t, per_colonna, pagina)
-            if self.indice_marca is not None:
-                art.altri[MARCA] = self.marca
-            articoli.append(art)
-            self.ultimo = art
+            for parte, variante in self._righe_per_prezzo(t, per_colonna, n_ancora):
+                art = self._articolo(t, parte, pagina)
+                if variante:
+                    campo = self.ancora if self.ancora in CAMPI else "modello"
+                    art.note_estrazione[campo] = (f"Variante: stesso {campo} con piu' prezzi, una riga per prezzo"
+                                                  " — verificare")
+                if self.indice_marca is not None:
+                    art.altri[MARCA] = self.marca
+                articoli.append(art)
+                self.ultimo = art
         if not gruppi and categorie:
             self.categoria = categorie[-1][1]
         if not gruppi and marche:
             self.marca = marche[-1][1]
         return articoli
+
+    def _righe_per_prezzo(self, t: _Tabella, per_colonna: dict[int, list[Riga]],
+                          n_ancora: int | None) -> list[tuple[dict[int, list[Riga]], bool]]:
+        """Un articolo con piu' prezzi su righe diverse della colonna Prezzo diventa una riga per prezzo.
+
+        Se ogni prezzo ha la sua ancora (sulla sua riga o fra lui e il successivo) sono articoli distinti finiti nella
+        stessa cella: RSL-8 e RSL-16, CB10/CB30/CB70 nella griglia del catalogo Etabeta. Se l'ancora e' una sola e
+        un'altra colonna ha un testo suo per ogni prezzo sono varianti dello stesso articolo («ACT-6Dante» per due
+        ricevitori, due descrizioni, due prezzi): ognuna ha la sua riga, con l'ancora comune e una nota (il bool).
+        Negli altri casi l'articolo resta uno, con l'anomalia «Piu' prezzi»: il prezzo si sceglie nell'anteprima.
+        """
+        n_prezzo = self._colonna_del_campo(t, "prezzo")
+        if n_prezzo is None or n_prezzo == n_ancora or n_ancora is None:
+            return [(per_colonna, False)]
+        col = t.colonne[n_prezzo]
+        prezzi = [r for r in per_colonna.get(n_prezzo, []) if self._prezzo_da_testo(r.testo).valore is not None]
+        if len(prezzi) < 2 or self._profilo_colonna(col)["campo"] != "prezzo":
+            return [(per_colonna, False)]
+        ancore = [r for r in per_colonna.get(n_ancora, []) if self._e_ancora(r, self.ancora, t.colonne[n_ancora])]
+        fasce = raggruppamento.dividi_per_prezzo(per_colonna, prezzi)
+
+        def distingue(n: int) -> bool:  # righe proprie in ogni fascia, non copiate da una fascia sola
+            insiemi = [{id(r) for r in f.get(n, [])} for f in fasce]
+            return all(insiemi) and len(set().union(*insiemi)) == sum(map(len, insiemi))
+
+        # varianti solo se un'altra colonna ha un testo suo sulla riga di ogni prezzo: con una descrizione sola
+        # («Articolo con due prezzi» del listino sintetico) nulla dice quale prezzo e' di cosa, e si chiede
+        if len(ancore) == 1 and any(distingue(n) for n in per_colonna if n not in (n_ancora, n_prezzo)):
+            return [(f, True) for f in fasce]
+        proprie = [[r for r in f.get(n_ancora, []) if any(r is a for a in ancore)] for f in fasce]
+        if len(ancore) == len(prezzi) and all(len(p) == 1 for p in proprie):
+            return [(f, False) for f in fasce]
+        return [(per_colonna, False)]
+
+    def _ancore_ingrandite(self, t: _Tabella, n_ancora: int) -> set[int]:
+        """Riporta nella colonna d'ancoraggio i «titoli» che sono ancore scritte piu' grandi: nella colonna, con
+        l'aspetto di un'ancora e sulla riga dei dati di un articolo (v. raggruppamento.sulla_riga_dei_dati).
+
+        Restituisce gli id dei titoli spostati. Se il titolo unisce il codice nel corpo del testo e una scritta piu'
+        grande, quella e' un bollino e resta fuori: sull'Etabeta «23550» e «NEW» (pagina 269) erano un titolo
+        solo, che toglieva l'articolo e diventava la categoria dei seguenti.
+        """
+        col = t.colonne[n_ancora]
+        corpo = self.metr.corpo
+        proprie = t.righe.get(n_ancora, [])
+        altre = [r for n, righe in t.righe.items() if n != n_ancora for r in righe]
+        n_prezzo = self._colonna_del_campo(t, "prezzo")
+        prezzi = t.righe.get(n_prezzo, []) if n_prezzo is not None else []
+        spostate: dict[int, Riga] = {}
+        for r in t.titoli:
+            nel_corpo = [s for s in r.spans if abs(s.size - corpo) <= raggruppamento.SCARTO_CORPO * corpo]
+            ancora = Riga(nel_corpo) if nel_corpo else r
+            if (all(assegna_colonna(s, t.colonne, self.p["spaziatura"]["tolleranza_colonna_pt"]) == n_ancora
+                    for s in ancora.spans)
+                    and aspetto_codice(_pulito(ancora.testo)) and self._e_ancora(ancora, self.ancora, col)
+                    and raggruppamento.sulla_riga_dei_dati(r, altre, proprie, prezzi, corpo)):
+                spostate[id(r)] = ancora
+        if spostate:
+            t.titoli = [r for r in t.titoli if id(r) not in spostate]
+            t.righe[n_ancora] = sorted([*proprie, *spostate.values()], key=lambda r: r.y0)
+        return set(spostate)
 
     def _stacca_coda(self, t: _Tabella, per_articolo: list[dict[int, list[Riga]]], n_ancora: int | None,
                      pagina: int) -> None:
@@ -523,9 +594,11 @@ class ParserListino:
                     art.note_estrazione["prezzo"] = (
                         f"Altro prezzo trovato a pagina {pagina} (colonna «{col.etichetta}»): «{righe[0].testo}» — verificare"
                     )
+            elif self._profilo_colonna(col)["campo"] == ALTRO_PREZZO and art.valore(self._chiave(col)) == "":
+                self._altro_prezzo(art, righe, col)
             else:
                 campo = self._chiave(col)
-                if not art.valore(campo):
+                if art.valore(campo) == "":
                     libero = self._profilo_colonna(col)["campo"] == TESTO_GENERICO
                     self._scrivi(art, campo, unisci_righe(testi, self.vocabolario if libero else None))
                 else:
@@ -551,6 +624,8 @@ class ParserListino:
                 else:
                     self._assegna_prezzo(art, righe, col)
                 prezzi_visti = True
+            elif pc["campo"] == ALTRO_PREZZO:
+                self._altro_prezzo(art, righe, col)
             elif pc["campo"] == "codice":
                 self._codice(art, unisci_righe([r.testo for r in righe]), col)
             elif pc["campo"] in ("modello", "ean", "descrizione", TESTO_GENERICO):
@@ -581,9 +656,27 @@ class ParserListino:
         return art
 
     def _chiave(self, col: ColonnaFisica) -> str:
-        """Dove va il testo di una colonna semplice: il suo campo, o "testo_N" per una colonna di testo."""
+        """Dove va il testo di una colonna semplice: il suo campo, o "testo_N"/"prezzo_N" per una colonna in piu'."""
         campo = self._profilo_colonna(col)["campo"]
-        return self.chiavi_testo[col.indice] if campo == TESTO_GENERICO else campo
+        return self.chiavi_testo[col.indice] if campo in (TESTO_GENERICO, ALTRO_PREZZO) else campo
+
+    def _altro_prezzo(self, art: Articolo, righe: list[Riga], col: ColonnaFisica) -> None:
+        """Un prezzo in piu': il valore se e' uno solo e riconoscibile, altrimenti il testo e una nota. Come per il
+        prezzo dell'articolo, fra due valori non si sceglie."""
+        chiave = self._chiave(col)
+        validi = [(r, v) for r in righe if (v := self._prezzo_da_testo(r.testo).valore) is not None]
+        if len(validi) == 1:
+            art.altri[chiave] = validi[0][1]
+            return
+        multipli = [p for r in righe for p in self._prezzi_nella_riga(r.testo)] if not validi else []
+        if validi or multipli:
+            art.altri[chiave] = " | ".join([r.testo for r, _ in validi] or multipli)
+            art.note_estrazione[chiave] = (
+                f"Piu' prezzi per lo stesso articolo ({art.altri[chiave]}) nella colonna «{col.etichetta}»: "
+                "indicare quello corretto")
+        else:
+            art.altri[chiave] = unisci_righe([r.testo for r in righe])
+            art.note_estrazione[chiave] = f"Prezzo non riconosciuto: «{art.altri[chiave]}» (colonna «{col.etichetta}»)"
 
     @staticmethod
     def _scrivi(art: Articolo, chiave: str, valore: str) -> None:
@@ -645,7 +738,22 @@ class ParserListino:
     def _regex_di(self, campo: str):
         return self.re_codice if campo == "codice" else self.re_ean
 
+    def _prezzi_nella_riga(self, testo: str) -> list[str]:
+        """I prezzi di una riga che ne contiene piu' d'uno e nient'altro («€ 53,00 € 60,00»); vuota altrimenti.
+        Un simbolo di valuta da solo va col numero che lo segue."""
+        parti: list[str] = []
+        for parola in testo.split():
+            if parti and normalizza_testo(parti[-1]) in ("€", "eur", "euro"):
+                parti[-1] = f"{parti[-1]} {parola}"
+            else:
+                parti.append(parola)
+        valide = len(parti) >= 2 and all(self._prezzo_da_testo(p).valore is not None for p in parti)
+        return parti if valide else []
+
     def _prezzo_da_testo(self, testo: str) -> RisultatoPrezzo:
+        # un «+» o un «-» staccato dopo il prezzo segna la variazione dal listino precedente (Midiware, giugno 2017:
+        # «249,00 -»), non fa parte del prezzo
+        testo = _SEGNO_VARIAZIONE.sub("", testo)
         if self.re_prezzo is not None:
             m = self.re_prezzo.search(testo)
             if not m:
@@ -675,5 +783,11 @@ class ParserListino:
         art.prezzo_testo = righe[0].testo
         esito = self._prezzo_da_testo(righe[0].testo)
         art.prezzo = esito.valore
-        if esito.motivo:
+        multipli = self._prezzi_nella_riga(righe[0].testo) if esito.valore is None else []
+        if multipli:
+            art.prezzo_testo = " | ".join(multipli)
+            art.note_estrazione["prezzo"] = (
+                f"Piu' prezzi per lo stesso articolo ({art.prezzo_testo}) nella colonna «{col.etichetta}»: "
+                "indicare quello corretto")
+        elif esito.motivo:
             art.note_estrazione["prezzo"] = f"{esito.motivo} (colonna «{col.etichetta}»)"

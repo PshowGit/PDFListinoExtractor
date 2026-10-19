@@ -29,7 +29,7 @@ from extractors.table_extractor import (
 from extractors.text_extractor import estrai_span
 from processors.data_validator import ean_valido
 from processors.estrazione import _campione
-from processors.models import INTESTAZIONI, MARCA, TESTO_GENERICO, Span
+from processors.models import ALTRO_PREZZO, INTESTAZIONI, MARCA, TESTO_GENERICO, Span
 from processors.price_parser import parse_prezzo
 from processors.profilo import (
     CAMPI_DATI,
@@ -293,6 +293,14 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
             fine = min(fine, x1)
         colonne.append(ColonnaRilevata(x, x1, etichetta, campo, esempi[i], intest is not None, len(testi[i]), fine,
                                        complete[i]))
+    # piu' colonne di prezzi (Midiware: Listino, Dealer, Premium, Street): il prezzo dell'articolo e' uno, quello
+    # che l'etichetta chiama prezzo o il primo; gli altri sono prezzi in piu'. Quattro «Prezzo» non si salvano, e
+    # ogni riga aveva l'anomalia «Secondo prezzo»
+    di_prezzo = [i for i, c in enumerate(colonne) if c.campo_proposto == "prezzo"]
+    principale = next((i for i in di_prezzo if partenze[i][2] == "prezzo"), di_prezzo[0] if di_prezzo else None)
+    for i in di_prezzo:
+        if i != principale:
+            colonne[i].campo_proposto = ALTRO_PREZZO
 
     ha_parentesi = any(c.campo_proposto in ("identificativo",) for c in colonne) or any(
         _CODICE_PARENTESI.match(t) for c, tt in zip(colonne, testi, strict=True) if c.campo_proposto == "codice" for t in tt
@@ -402,9 +410,10 @@ def profilo_da_analisi(
         nome_di_campo = campo_da_intestazione(col.etichetta)[0] is not None
         voce = {
             "campo": campo,
-            # una colonna di testo si ritrova dal suo nome («Colour»), come quelle col nome di un campo
-            "intestazioni": [col.etichetta] if col.da_intestazione and (nome_di_campo or campo == TESTO_GENERICO)
-            else [],
+            # una colonna di testo o un prezzo in piu' si ritrova dal suo nome («Colour», «Dealer»), come quelle
+            # col nome di un campo
+            "intestazioni": [col.etichetta] if col.da_intestazione and (
+                nome_di_campo or campo in (TESTO_GENERICO, ALTRO_PREZZO)) else [],
             "x_relativo": round(col.x0 / analisi.larghezza, 4),
         }
         nome_colonna = (etichette[i] if etichette is not None else "").strip()

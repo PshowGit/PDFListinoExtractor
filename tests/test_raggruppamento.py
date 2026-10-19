@@ -1,6 +1,15 @@
 from extractors.table_extractor import Riga
 from processors.models import Span
-from processors.raggruppamento import a_fianco_dei_dati, coda_staccata, corse, estensioni, gruppi, nella_fascia
+from processors.raggruppamento import (
+    a_fianco_dei_dati,
+    coda_staccata,
+    corse,
+    dividi_per_prezzo,
+    estensioni,
+    gruppi,
+    nella_fascia,
+    sulla_riga_dei_dati,
+)
 
 
 def _riga(testo, y):
@@ -97,6 +106,44 @@ def test_non_sono_bollini_titoli_lunghi_grandi_o_accanto_a_testo_di_altro_corpo(
     assert not _bollino(_span("NEW PRODUCT", 82, 253.9, corpo=12), dati, ancore)  # due parole
     promozionale = [_span("il controllo flessibile da remoto", 272, 213.7, corpo=11)]
     assert not _bollino(_span("Vari", 81, 205.3, corpo=12, altezza=20.1), promozionale, ancore)  # testo in corpo 11
+
+
+def test_una_fascia_per_prezzo_tagliata_a_meta():
+    # Etabeta pagina 122: le due righe di ogni voce stanno una sopra e una sotto codice e prezzo
+    codici = [_span("WP1-SI", 167, 341.7), _span("WP1-SP", 167, 363.3)]
+    descrizioni = [_span("Scatola da incasso", 238, 336.3), _span("Dimensioni: 68x68x48 mm", 238, 347.1),
+                   _span("Scatola da parete", 238, 357.9), _span("Dimensioni: 110x110x48 mm", 238, 368.7)]
+    prezzi = [_span("€ 5,00", 541, 341.1), _span("€ 12,00", 536, 363.9)]
+    prima, seconda = dividi_per_prezzo({0: codici, 1: descrizioni, 2: prezzi}, prezzi)
+    assert [[r.testo for r in prima[n]] for n in range(3)] == [
+        ["WP1-SI"], ["Scatola da incasso", "Dimensioni: 68x68x48 mm"], ["€ 5,00"]]
+    assert [r.testo for r in seconda[1]] == ["Scatola da parete", "Dimensioni: 110x110x48 mm"]
+
+
+def test_una_colonna_in_una_fascia_sola_e_comune_a_tutte():
+    # Etabeta pagina 257: la descrizione di BAL-08, scritta una volta per le due lunghezze
+    codici = [_span("BAL-08/1m", 167, 356.7), _span("BAL-08/2m", 167, 378.3)]
+    descrizione = [_span("Barra in alluminio", 301, 373.6), _span("per Strip Led da 12mm", 241, 384.4)]
+    prezzi = [_span("€ 6,90", 539, 356.7), _span("€ 13,00", 534, 378.3)]
+    fasce = dividi_per_prezzo({0: codici, 1: descrizione, 2: prezzi}, prezzi)
+    assert [[r.testo for r in f[0]] for f in fasce] == [["BAL-08/1m"], ["BAL-08/2m"]]
+    assert all([r.testo for r in f[1]] == ["Barra in alluminio", "per Strip Led da 12mm"] for f in fasce)
+
+
+def test_codice_scritto_piu_grande_sulla_riga_dei_suoi_dati():
+    # listino Midiware, pagina 36: «SOFBCA» in corpo 8 su un testo in corpo 6, sulla riga di nome e prezzi
+    codice = _span("SOFBCA", 40, 120.8, corpo=8, altezza=9.6)
+    nome, prezzo = _span("British Class A", 94, 121.3, corpo=6, altezza=7.2), _span("172,00", 471, 121.3, corpo=6, altezza=7.2)
+    descrizione = _span("Plug In Channel Strip", 218, 121.3, corpo=6, altezza=7.2)
+    assert sulla_riga_dei_dati(codice, [nome, descrizione, prezzo], [], [prezzo], 6)
+    # un titolo su una fascia sua, una scritta senza prezzo accanto («STUDIO», Etabeta pagina 245), troppo grande,
+    # o con un altro codice sulla stessa riga non sono codici
+    assert not sulla_riga_dei_dati(_span("SOFTUBE", 40, 100, corpo=8), [nome, descrizione, prezzo], [], [prezzo], 6)
+    assert not sulla_riga_dei_dati(codice, [nome, descrizione], [], [], 6)
+    assert not sulla_riga_dei_dati(_span("SOFBCA", 40, 117, corpo=15, altezza=15), [nome, descrizione, prezzo], [],
+                                   [prezzo], 6)
+    assert not sulla_riga_dei_dati(codice, [nome, descrizione, prezzo], [_span("SOFXL9", 40, 121.3, corpo=6)],
+                                   [prezzo], 6)
 
 
 def test_bollino_senza_articolo_accanto_non_e_un_bollino():

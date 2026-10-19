@@ -5,11 +5,13 @@
 Conta, pagina per pagina, le scritte che hanno la forma di un prezzo («€ 1.234,56») e le confronta con
 gli articoli estratti che hanno un prezzo. Un'estrazione che attribuisce piu' prezzi di quanti la pagina
 ne contenga ne inventa; una che ne attribuisce meno perde articoli. Il profilo e' la proposta del wizard.
+Contano anche i prezzi delle colonne «Altro prezzo», di un listino con piu' prezzi per riga.
 """
 import collections
 import re
 import sys
 import time
+from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -33,7 +35,10 @@ def misura(pdf: str, pagina: int) -> dict:
     with pymupdf.open(pdf) as d:
         nel_pdf = {i + 1: sum(1 for s in estrai_span(d[i], i + 1) if FORMA_PREZZO.match(s.testo))
                    for i in range(d.page_count)}
-    estratti = collections.Counter(x.pagina for x in r.articoli if x.prezzo is not None)
+    # anche i prezzi in piu' (Midiware: Dealer, Premium, Street), che nel PDF hanno la stessa forma
+    estratti = collections.Counter()
+    for x in r.articoli:
+        estratti[x.pagina] += (x.prezzo is not None) + sum(isinstance(v, Decimal) for v in x.altri.values())
     totale = sum(nel_pdf.values())
     return {
         "mappatura": [(c.etichetta, c.campo_proposto) for c in a.colonne],

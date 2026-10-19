@@ -9,10 +9,10 @@ import functools
 import re
 import unicodedata
 
-from processors.models import INTESTAZIONI, MARCA, TESTO_GENERICO, ColonnaUscita
+from processors.models import ALTRO_PREZZO, INTESTAZIONI, MARCA, TESTO_GENERICO, ColonnaUscita
 
 CAMPI_DATI = ("modello", "codice", "ean", "descrizione", "prezzo")
-CAMPI_COLONNA = (*CAMPI_DATI, "identificativo", TESTO_GENERICO, MARCA, "ignora")
+CAMPI_COLONNA = (*CAMPI_DATI, "identificativo", TESTO_GENERICO, MARCA, ALTRO_PREZZO, "ignora")
 CAMPI_ANCORA = ("codice", "ean", "modello", "prezzo")  # ordine di preferenza nella scelta automatica
 CONTIENE_PREDEFINITO = ["modello", "codice", "ean"]
 
@@ -158,15 +158,19 @@ def campi_mappati(profilo: dict) -> set[str]:
     for c in profilo["colonne"]:
         if c["campo"] == "identificativo":
             campi.update(c.get("contiene", CONTIENE_PREDEFINITO))
-        elif c["campo"] not in ("ignora", TESTO_GENERICO, MARCA):
+        elif c["campo"] not in ("ignora", TESTO_GENERICO, MARCA, ALTRO_PREZZO):
             campi.add(c["campo"])
     return campi
 
 
 def chiavi_testo(profilo: dict) -> dict[int, str]:
-    """Indice della colonna del profilo -> chiave della sua colonna di testo ("testo_1", "testo_2"...)."""
-    indici = [i for i, c in enumerate(profilo["colonne"]) if c["campo"] == TESTO_GENERICO]
-    return {i: f"testo_{n}" for n, i in enumerate(indici, 1)}
+    """Indice della colonna del profilo -> chiave della sua colonna in piu': "testo_1", "testo_2"... per le
+    colonne di testo, "prezzo_1", "prezzo_2"... per i prezzi in piu'."""
+    chiavi = {}
+    for ruolo, prefisso in ((TESTO_GENERICO, "testo"), (ALTRO_PREZZO, "prezzo")):
+        indici = [i for i, c in enumerate(profilo["colonne"]) if c["campo"] == ruolo]
+        chiavi.update({i: f"{prefisso}_{n}" for n, i in enumerate(indici, 1)})
+    return chiavi
 
 
 def colonne_uscita(profilo: dict) -> list[ColonnaUscita]:
@@ -187,10 +191,10 @@ def colonne_uscita(profilo: dict) -> list[ColonnaUscita]:
                 visti.add(MARCA)
                 out.append(ColonnaUscita(MARCA, c.get("etichetta") or INTESTAZIONI[MARCA], MARCA))
             continue
-        if campo == TESTO_GENERICO:
-            n = len([k for k in testo if k <= i])
-            nome = c.get("etichetta") or next(iter(c.get("intestazioni") or []), "") or f"Testo {n}"
-            out.append(ColonnaUscita(testo[i], nome, TESTO_GENERICO))
+        if campo in (TESTO_GENERICO, ALTRO_PREZZO):
+            predefinito = testo[i].replace("_", " ").capitalize()  # «Testo 1», «Prezzo 2»
+            nome = c.get("etichetta") or next(iter(c.get("intestazioni") or []), "") or predefinito
+            out.append(ColonnaUscita(testo[i], nome, campo))
             continue
         campi = c.get("contiene", CONTIENE_PREDEFINITO) if campo == "identificativo" else [campo]
         for f in campi:

@@ -111,15 +111,22 @@ def crea_listino_generico(percorso: str | Path, con_intestazione: bool = True) -
 # --- colonne dinamiche -----------------------------------------------------------------------------
 # Due listini con colonne diverse dalle cinque standard: il foglio "Listino" deve avere le loro, con i
 # loro nomi. "tre": Articolo | Descrizione | Prezzo, niente codice ne' EAN. "colore": una colonna in piu'
-# («Colour») fra quelle note, che non e' il nome di nessun campo.
+# («Colour») fra quelle note, che non e' il nome di nessun campo. "prezzi": tre colonne di prezzi, come il
+# listino Midiware (Listino, Dealer, Street): una e' il prezzo, le altre prezzi in piu'.
 _ART = [
-    ("SP-100", ["Bookshelf speaker 50W"], E[0], "Black", "249.00"),
-    ("SP-200", ["Floorstanding speaker", "walnut finish"], E[1], "Walnut", "1,249.50"),
-    ("SP-300", ["Active subwoofer 300W"], E[2], "White", "599.00"),
-    ("AMP-1", ["Stereo amplifier 2x100W"], E[3], "Silver", "349.00"),
-    ("AMP-2", ["Power amplifier 2x400W", "rack mount 2U"], E[4], "Black", "2,100.00"),
-    ("CBL-10", ["Speaker cable 10 m"], E[5], "Red", "35.00"),
+    ("SP-100", ["Bookshelf speaker 50W"], E[0], "Black", "249.00", "189.00", "259.00"),
+    ("SP-200", ["Floorstanding speaker", "walnut finish"], E[1], "Walnut", "1,249.50", "949.00", "1,299.00"),
+    ("SP-300", ["Active subwoofer 300W"], E[2], "White", "599.00", "455.20", "629.00"),
+    ("AMP-1", ["Stereo amplifier 2x100W"], E[3], "Silver", "349.00", "265.00", "359.00"),
+    ("AMP-2", ["Power amplifier 2x400W", "rack mount 2U"], E[4], "Black", "2,100.00", "1,596.00", "2,190.00"),
+    ("CBL-10", ["Speaker cable 10 m"], E[5], "Red", "35.00", "26.60", "39.00"),
 ]
+
+
+def _numero(testo: str) -> float:
+    return float(testo.replace(",", ""))
+
+
 VARIANTI = {
     # (etichetta, x, allineamento, valore dell'articolo)
     "tre": [("Articolo", 40, "sx", lambda a: [a[0]]), ("Descrizione", 140, "sx", lambda a: a[1]),
@@ -127,12 +134,17 @@ VARIANTI = {
     "colore": [("SKU", 40, "sx", lambda a: [a[0]]), ("Description", 120, "sx", lambda a: a[1]),
                ("Colour", 300, "sx", lambda a: [a[3]]), ("EAN", 380, "sx", lambda a: [a[2]]),
                ("Price EUR", 550, "dx", lambda a: [a[4]])],
+    "prezzi": [("Code", 40, "sx", lambda a: [a[0]]), ("Description", 140, "sx", lambda a: a[1]),
+               ("List price", 430, "dx", lambda a: [a[4]]), ("Dealer", 490, "dx", lambda a: [a[5]]),
+               ("Street", 550, "dx", lambda a: [a[6]])],
 }
 ATTESI_COLONNE = {
     "tre": (["Articolo", "Descrizione", "Prezzo"],
-            [[a[0], " ".join(a[1]), float(a[4].replace(",", ""))] for a in _ART]),
+            [[a[0], " ".join(a[1]), _numero(a[4])] for a in _ART]),
     "colore": (["SKU", "Description", "Colour", "EAN", "Price EUR"],
-               [[a[0], " ".join(a[1]), a[3], a[2], float(a[4].replace(",", ""))] for a in _ART]),
+               [[a[0], " ".join(a[1]), a[3], a[2], _numero(a[4])] for a in _ART]),
+    "prezzi": (["Code", "Description", "List price", "Dealer", "Street"],
+               [[a[0], " ".join(a[1]), _numero(a[4]), _numero(a[5]), _numero(a[6])] for a in _ART]),
 }
 
 

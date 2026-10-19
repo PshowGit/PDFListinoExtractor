@@ -10,11 +10,11 @@ import config
 from config import elenco_fornitori, regole_fornitore
 from exporters.excel_exporter import EsportazioneFallita, esporta_listino, esporta_report_anomalie
 from extractors.pdf_reader import InfoPdf, PdfNonValido, verifica_pdf
-from gui.dialoghi import FinestraAvvisi, chiedi_testo
+from gui.dialoghi import FinestraAvvisi, chiedi_testo, in_primo_piano
 from gui.lavoro import LavoroInProcesso
 from gui.page_viewer import FinestraPagina
 from gui.pannelli import pannello_diviso
-from gui.preview_table import DA_VERIFICARE, TUTTE, PreviewTable
+from gui.preview_table import DA_VERIFICARE, TUTTE, PreviewTable, testo_cella
 from percorsi import icona
 from processors.estrazione import RisultatoEstrazione
 from processors.lavori import ESTRAZIONE
@@ -393,7 +393,7 @@ class FinestraPrincipale(ctk.CTk):
         self.dettaglio.delete("1.0", "end")
         if a is not None:
             colonne = self.tabella.colonne
-            dati = "   ".join(f"{c.etichetta} {a.valore(c.chiave) or '—'}" for c in colonne
+            dati = "   ".join(f"{c.etichetta} {testo_cella(a, c) or '—'}" for c in colonne
                                if c.ruolo not in ("descrizione", "prezzo"))
             prezzo = ""
             if any(c.ruolo == "prezzo" for c in colonne):
@@ -526,7 +526,7 @@ class FinestraPrincipale(ctk.CTk):
         from gui.wizard_fornitore import WizardFornitore
 
         if self._wizard is not None and self._wizard.winfo_exists():
-            self._wizard.lift()
+            in_primo_piano(self._wizard)
             if modifica is not None:
                 messagebox.showinfo(
                     "Modifica fornitore", "Il wizard e' gia' aperto: chiudilo prima di modificare un fornitore.",

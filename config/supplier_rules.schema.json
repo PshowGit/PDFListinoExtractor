@@ -27,7 +27,7 @@
       "type": "object",
       "required": ["campo"],
       "properties": {
-        "campo": {"enum": ["modello", "codice", "ean", "descrizione", "prezzo", "identificativo", "testo_generico", "marca", "ignora"]},
+        "campo": {"enum": ["modello", "codice", "ean", "descrizione", "prezzo", "identificativo", "testo_generico", "marca", "altro_prezzo", "ignora"]},
         "etichetta": {
           "description": "Nome della colonna nella tabella e nel foglio Listino; senza, il nome standard del campo.",
           "type": "string", "minLength": 1

@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -232,6 +233,41 @@ def test_il_profilo_salva_i_nomi_e_l_export_li_usa(colore):
     assert [c.etichetta for c in r.colonne] == ATTESI_COLONNE["colore"][0]
     assert [x.altri["testo_1"] for x in r.articoli] == [riga[2] for riga in ATTESI_COLONNE["colore"][1]]
     assert all(x.categoria == "" for x in r.articoli)  # «Colour» non e' una marca
+
+
+@pytest.fixture
+def prezzi(tmp_path):
+    from tests.sintetico_generico import crea_listino_colonne
+
+    pdf = crea_listino_colonne(tmp_path / "prezzi.pdf", "prezzi")
+    return ModelloWizard(analizza_pdf(str(pdf), 1)), pdf
+
+
+def test_piu_colonne_di_prezzi_una_e_il_prezzo_le_altre_prezzi_in_piu(prezzi):
+    # come il listino Midiware: il prezzo e' quello che l'etichetta chiama cosi' («List price»)
+    m, pdf = prezzi
+    assert m.campi == ["codice", "descrizione", "prezzo", "altro_prezzo", "altro_prezzo"]
+    assert m.etichette == ["Code", "Description", "List price", "Dealer", "Street"]
+    m.nome = "ACME"
+    assert m.errori() == []
+    p = m.profilo()
+    valida_schema({"versione_schema": 2, "fornitori": {"acme": p}})
+    assert [c["intestazioni"] for c in p["colonne"][3:]] == [["Dealer"], ["Street"]]
+    r = estrai_listino(pdf, p)
+    assert [(c.chiave, c.etichetta, c.ruolo) for c in r.colonne[2:]] == [
+        ("prezzo", "List price", "prezzo"), ("prezzo_1", "Dealer", "altro_prezzo"), ("prezzo_2", "Street", "altro_prezzo")]
+    assert [x.altri["prezzo_1"] for x in r.articoli][:2] == [Decimal("189.00"), Decimal("949.00")]
+    assert not any(x.tutte_le_anomalie() for x in r.articoli)  # niente «Secondo prezzo»
+    assert all(x.categoria == "" for x in r.articoli)  # «Dealer · Street» non e' una categoria
+
+
+def test_due_colonne_prezzo_si_correggono_con_altro_prezzo(prezzi):
+    m, _ = prezzi
+    m.nome = "ACME"
+    m.imposta_campo(3, "prezzo")
+    assert any("«Altro prezzo»" in e for e in m.errori())
+    m.imposta_campo(3, "altro_prezzo")
+    assert m.etichette[3] == "Dealer" and m.errori() == []
 
 
 def test_il_nome_segue_il_ruolo_ma_non_cancella_quello_scelto(colore):

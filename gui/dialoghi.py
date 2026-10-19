@@ -10,6 +10,25 @@ import customtkinter as ctk
 from percorsi import icona
 
 
+def in_primo_piano(finestra: tk.Misc) -> None:
+    """Porta una finestra davanti alle altre, col fuoco. Su Windows un CTkToplevel appena creato finisce dietro la
+    finestra principale (CTk ne sistema l'icona e i colori dopo l'apertura), e chi clicca «Configura nuovo
+    fornitore» credeva che non succedesse nulla. Per un attimo «sempre in primo piano», poi di nuovo normale:
+    la finestra principale si deve poter riportare davanti."""
+    def davanti():
+        if not finestra.winfo_exists():
+            return
+        if finestra.state() == "iconic":
+            finestra.deiconify()
+        finestra.lift()
+        finestra.attributes("-topmost", True)
+        finestra.focus_force()
+        finestra.after(400, lambda: finestra.winfo_exists() and finestra.attributes("-topmost", False))
+
+    davanti()
+    finestra.after(300, davanti)  # dopo le sistemazioni di CTk, che riportavano davanti la principale
+
+
 class DialogoTesto(ctk.CTkToplevel):
     """Chiede una riga di testo, gia' compilata con `iniziale`. `risultato` resta None se si annulla."""
 
@@ -90,7 +109,7 @@ class FinestraAvvisi(ctk.CTkToplevel):
         ctk.CTkButton(barra, text="Copia negli appunti", width=150, fg_color="gray", command=self.copia).pack(
             side="right", padx=8)
         self.bind("<Escape>", lambda e: self.destroy())
-        self.after(150, lambda: self.winfo_exists() and self.lift())
+        in_primo_piano(self)
 
     def copia(self) -> None:
         self.clipboard_clear()

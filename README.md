@@ -10,7 +10,8 @@ Gennaio 2026 — Prezzi al pubblico»).
 
 Un file `.xlsx` con un solo foglio, **`Listino`**, con le colonne che il listino ha davvero, con i nomi
 scelti nel wizard. Un catalogo con «Articolo | Descrizione | Listino» dà quelle tre colonne, senza Codice
-né EAN vuoti; una colonna in più («Colore», «Note») esce col suo nome. Il profilo JBL incluso, e ogni
+né EAN vuoti; una colonna in più («Colore», «Note») esce col suo nome, e così i prezzi in più («Dealer»,
+«Street»), come numeri. Il profilo JBL incluso, e ogni
 fornitore configurato prima delle colonne dinamiche, dà le cinque colonne di sempre:
 
 | Modello | Codice | EAN | Descrizione | Prezzo |
@@ -134,7 +135,11 @@ uv run python main.py
    righe, solo quelle da verificare o solo quelle con un tipo di anomalia («Prezzo mancante», «Duplicato»,
    «Marca mancante»…), ognuno col numero di righe; i numeri si aggiornano a ogni correzione. Si può:
    - ordinare cliccando sull'intestazione di una colonna;
-   - correggere con un doppio clic su una cella (la descrizione si apre in una finestra);
+   - correggere con un doppio clic su una cella (la descrizione si apre in una finestra). Se per un articolo
+     sono stati trovati più prezzi («Più prezzi per lo stesso articolo»), la cella diventa un menu con i prezzi
+     trovati: basta sceglierne uno. Quando invece ogni prezzo ha il suo codice sulla stessa riga (due voci nella
+     stessa cella del PDF) il programma le separa da solo, una riga per prezzo; le varianti di uno stesso codice
+     con descrizioni diverse diventano righe separate segnate «Variante»;
    - correggere da tastiera: `←` `→` scelgono la colonna (segnata con ▸ nell'intestazione), `Invio` o `F2`
      apre la cella; nella correzione `Invio` conferma e scende alla riga dopo, `Tab` / `Maiusc+Tab` passano
      alla cella accanto, `Esc` annulla; nella finestra della descrizione `Ctrl+Invio` salva;
@@ -162,7 +167,9 @@ Nella finestra principale: **Configura nuovo fornitore…**
 2. Per ogni colonna il menu propone un campo, dedotto da intestazione e contenuto: Modello, Codice, EAN,
    Descrizione, Prezzo, *Modello + Codice + EAN impilati* nella stessa colonna (come nel listino JBL),
    *Testo* per una colonna in più, *Marca* per la colonna sopra cui l'intestazione di ogni tabella scrive la
-   marca (come nel catalogo Etabeta), oppure *ignora*. Sotto il menu c'è il **nome della colonna** nella tabella
+   marca (come nel catalogo Etabeta), *Altro prezzo* per i prezzi in più di un listino che ne ha diversi per
+   riga (Listino, Dealer, Premium, Street: il wizard propone come Prezzo quello che l'intestazione chiama così,
+   o il primo, e gli altri come Altro prezzo; nell'Excel sono numeri come il prezzo), oppure *ignora*. Sotto il menu c'è il **nome della colonna** nella tabella
    e nell'Excel: l'intestazione del PDF se è il nome di quel campo («Articolo», «Listino», «Prezzo al
    Pubblico»), altrimenti il nome standard; si può cambiare. Un clic su una colonna della pagina evidenzia
    il suo menu.

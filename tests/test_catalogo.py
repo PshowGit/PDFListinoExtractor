@@ -41,6 +41,83 @@ def test_span_attaccati_sono_una_parola_sola():
     assert [s["text"] for s in _unisci_contigui(spans)] == ["ProgeƩato per", "durare"]
 
 
+def _grezzi(*parti):
+    """Span grezzi attaccati uno all'altro: (testo, corpo, larghezza)."""
+    spans, x = [], 100.0
+    for testo, corpo, larghezza in parti:
+        spans.append({"text": testo, "bbox": (x, 0, x + larghezza, corpo), "size": corpo})
+        x += larghezza
+    return [s["text"] for s in _unisci_contigui(spans)]
+
+
+def test_il_bollino_attaccato_al_codice_resta_a_parte():
+    # pagina 269: «23550  » in corpo 9 e «NEW» in corpo 12 si toccano; uniti erano un titolo e l'articolo spariva
+    assert _grezzi(("23550  ", 9, 30), ("NEW", 12, 28)) == ["23550  ", "NEW"]
+    # pagina 378: anche la descrizione dopo il bollino resta a parte
+    assert _grezzi(("SK213-T3 ", 9, 43), ("NEW", 12, 28), (" ", 9, 5), ("Cavo High End", 9, 60)) == [
+        "SK213-T3 ", "NEW", " Cavo High End"]
+
+
+def test_una_scritta_grande_seguita_da_una_piccola_resta_unita():
+    # pagine 112 e 142: divise, «SERIE» e «Turbo Speaker Horn» cadevano fra i dati
+    assert _grezzi(("NEW MI", 18, 67), (" ", 10, 5), ("SERIE", 10, 30)) == ["NEW MI SERIE"]
+    assert _grezzi(("SW", 16, 26), (" ", 11, 5), ("Turbo Speaker Horn", 11, 105)) == ["SW Turbo Speaker Horn"]
+
+
+def _griglia_con_piu_prezzi(percorso: Path) -> Path:
+    """Una tabella a griglia: una cella con due voci (codice e prezzo ciascuna, come RSL-8/RSL-16 dell'Etabeta), una
+    con un codice e due varianti (come ACT-6Dante), una con due prezzi sulla stessa riga."""
+    import pymupdf
+
+    righe = [  # (y, codice, descrizione, prezzo)
+        (125, "AB-100", "Primo articolo", "EUR 10,00"),
+        (150, "AB-200", "Secondo articolo", "EUR 20,00"), (163, "AB-300", "Terzo articolo", "EUR 30,00"),
+        (185, "AB-400", "Versione nera", "EUR 40,00"), (198, None, "Versione bianca", "EUR 45,00"),
+        (225, "AB-500", "Quinto articolo", "EUR 50,00"),
+        (250, "AB-600", "Due prezzi in fila", "EUR 60,00 EUR 66,00"),
+    ]
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    for x, testo in ((60, "Articolo"), (160, "Descrizione"), (480, "Listino")):
+        page.insert_text((x, 100), testo, fontsize=9)
+    for y in (112, 140, 175, 212, 238, 262):
+        page.draw_line((40, y), (560, y), width=0.5)
+    for y, codice, descrizione, prezzo in righe:
+        if codice:
+            page.insert_text((60, y), codice, fontsize=9)
+        page.insert_text((160, y), descrizione, fontsize=9)
+        page.insert_text((540 - pymupdf.get_text_length(prezzo, fontsize=9), y), prezzo, fontsize=9)
+    doc.save(percorso)
+    doc.close()
+    return percorso
+
+
+def test_piu_prezzi_nella_stessa_cella_una_riga_per_prezzo(tmp_path):
+    pdf = _griglia_con_piu_prezzi(tmp_path / "griglia.pdf")
+    a = analizza_pdf(str(pdf), 1)
+    profilo = profilo_da_analisi(a, [c.campo_proposto for c in a.colonne], linee=True)
+    r = estrai_listino(pdf, profilo)
+    righe = [(x.modello, x.descrizione, x.prezzo) for x in r.articoli]
+    assert righe[:6] == [
+        ("AB-100", "Primo articolo", Decimal("10.00")),
+        ("AB-200", "Secondo articolo", Decimal("20.00")), ("AB-300", "Terzo articolo", Decimal("30.00")),
+        ("AB-400", "Versione nera", Decimal("40.00")), ("AB-400", "Versione bianca", Decimal("45.00")),
+        ("AB-500", "Quinto articolo", Decimal("50.00")),
+    ]
+    # le due voci di una cella sono articoli puliti; le varianti dello stesso codice si segnalano
+    assert not r.articoli[1].note_estrazione and not r.articoli[2].note_estrazione
+    assert all(x.note_estrazione["modello"].startswith("Variante") for x in r.articoli[3:5])
+    # due prezzi sulla stessa riga: non si sceglie, ma si possono scegliere dall'anteprima
+    sesto = r.articoli[6]
+    assert sesto.prezzo is None and sesto.prezzo_testo == "EUR 60,00 | EUR 66,00"
+    assert sesto.note_estrazione["prezzo"].startswith("Piu' prezzi")
+
+
+def test_due_prezzi_separati_da_uno_spazio_sono_due_celle():
+    # listino Midiware di giugno 2017: uniti, sconfinavano nella colonna dopo
+    assert _grezzi(("15.750,00", 8, 29), (" ", 8, 5), ("13.853,00", 8, 29)) == ["15.750,00 ", "13.853,00"]
+
+
 @pytest.mark.parametrize("testo, atteso", [
     ("DCP-1000", True), ("TU-NE1", True), ("Decoair-350L", True), ("TRIPOD-GA", True), ("M-CAT5E-2", True),
     ("esaurimento", False), ("6 ingressi di linea stereo con", False), ("Il ti", False), ("Zoccoli portalampada", False),
