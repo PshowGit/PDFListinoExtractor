@@ -5,7 +5,10 @@ Riproduce, misurate sul PDF vero: piu' tabelle per pagina, ognuna con l'intestaz
 interlinea uniforme, cosi' che fra un articolo e l'altro non c'e' nessuno spazio in piu'; linee di
 griglia fra le celle (variante `linee=False`: senza); una tabella che prosegue nella pagina dopo
 senza intestazione; una sezione con modelli scritti come nomi («IsoLater»); un prezzo «Chiedere /
-quotazioni» su due righe (prezzi scritti «EUR 888,00»: il font helv dei PDF di prova non ha il «€»); testo promozionale centrato nella colonna della marca.
+quotazioni» su due righe (prezzi scritti «EUR 888,00»: il font helv dei PDF di prova non ha il «€»); testo promozionale centrato nella colonna della marca;
+schede prodotto (pagine 140 e 225 del PDF vero): codice, titolo e prezzo sulla prima riga, una linea sotto e
+le caratteristiche nella sola colonna della descrizione, nella cella successiva; un bollino «NEW» in corpo
+12 sotto il codice, nella sua cella, che non e' un titolo di sezione (pagina 13).
 """
 from dataclasses import dataclass
 from decimal import Decimal
@@ -51,8 +54,19 @@ PAGINE = [
         (["M-CAT5E-3"], ["Cavo Mogami CAT5E - 3 metri"], ["EUR 19,00"]),
     ],
 ]
+# solo nella variante con griglia: nel PDF vero le schede prodotto hanno sempre le linee, e i tre codici in
+# piu' porterebbero oltre il 70% i modelli con l'aspetto di un codice, togliendo la sezione dei nomi (ARX)
+PAGINA_SCHEDE = [
+    ("tabella", "PAN Acoustic", "FULL RANGE SPEAKER"),
+    ("scheda", "P04-AMT", "Diffusore passivo 2 Vie", "EUR 2.432,00",
+     ["4x3,5 woofer high quality", "Potenza 200W/4ohm", "Dimensioni 506x107x118mm"]),
+    ("scheda", "P12-AMT", "Diffusore passivo Bass Reflex", "EUR 3.553,00", ["12x3,5 woofer", "Peso 8,8kg"]),
+    (["P8-CX"], ["Diffusore coassiale", "Woofer 8 HQ", "Risposta 60Hz-22KHz"], ["EUR 2.275,00"], "NEW"),
+    (["PCX-WB"], ["Staffa a muro fissa"], ["EUR 185,00"]),
+]
 
 _V, _A, _M = "VISSONIC · MODULI INPUT", "ARX · AUDIBOX", "MOGAMI · CAVI CAT5E"
+_P = "PAN Acoustic · FULL RANGE SPEAKER"
 ATTESI = [
     AttesoCatalogo("VMHM4I", "Scheda input 4 canali HDMI", Decimal("888.00"), 1, _V),
     AttesoCatalogo("VMHM2I-4K", "Scheda input 2 canali HDMI 4k@60Hz con audio analogico", Decimal("1400.00"), 1, _V),
@@ -65,6 +79,11 @@ ATTESI = [
     AttesoCatalogo("Iso Switcher", "Commutatore stereo A/B 2+2 XLR/In - 2 XLR/Out", Decimal("175.00"), 2, _A),
     AttesoCatalogo("M-CAT5E-2", "Cavo Mogami CAT5E - 2 metri", Decimal("16.00"), 2, _M),
     AttesoCatalogo("M-CAT5E-3", "Cavo Mogami CAT5E - 3 metri", Decimal("19.00"), 2, _M),
+    AttesoCatalogo("P04-AMT", "Diffusore passivo 2 Vie 4x3,5 woofer high quality Potenza 200W/4ohm "
+                   "Dimensioni 506x107x118mm", Decimal("2432.00"), 3, _P),
+    AttesoCatalogo("P12-AMT", "Diffusore passivo Bass Reflex 12x3,5 woofer Peso 8,8kg", Decimal("3553.00"), 3, _P),
+    AttesoCatalogo("P8-CX", "Diffusore coassiale Woofer 8 HQ Risposta 60Hz-22KHz", Decimal("2275.00"), 3, _P),
+    AttesoCatalogo("PCX-WB", "Staffa a muro fissa", Decimal("185.00"), 3, _P),
 ]
 
 
@@ -74,7 +93,7 @@ def attesi(linee: bool) -> list[AttesoCatalogo]:
     if linee:
         return ATTESI
     return [AttesoCatalogo("Super Splitter Duo" if a.modello == "Super Splitter Duo" else a.modello,
-                           a.descrizione, a.prezzo, a.pagina, a.categoria, a.anomalie) for a in ATTESI]
+                           a.descrizione, a.prezzo, a.pagina, a.categoria, a.anomalie) for a in ATTESI if a.pagina < 3]
 
 
 def _scrivi(page, x, y, testo, corpo=CORPO):
@@ -92,7 +111,7 @@ def _centrato(page, x_centro, y, testo, corpo=CORPO):
 def crea_catalogo(percorso: str | Path, linee: bool = True) -> Path:
     percorso = Path(percorso)
     doc = pymupdf.open()
-    for n, contenuto in enumerate(PAGINE, 1):
+    for n, contenuto in enumerate(PAGINE + ([PAGINA_SCHEDE] if linee else []), 1):
         page = doc.new_page(width=595.2, height=842)
         _centrato(page, 297, 22, "SUONO", 14)  # testata ripetuta
         _scrivi(page, 520, 820, str(n + 3), 9)  # numero di pagina
@@ -104,6 +123,19 @@ def crea_catalogo(percorso: str | Path, linee: bool = True) -> Path:
             if elem[0] == "spazio":
                 y += elem[1]
                 continue
+            if elem[0] == "scheda":
+                # prima riga: codice, titolo e prezzo; sotto, separate da una linea, le caratteristiche
+                _, codice, titolo, prezzo, caratteristiche = elem
+                for riga_y in (y, y + PASSO):
+                    if linee:
+                        page.draw_line((135, riga_y - 6.5), (570, riga_y - 6.5), width=0.5)
+                _scrivi(page, X_ART, y, codice)
+                _scrivi(page, X_DESC, y, titolo)
+                _a_destra(page, X_PREZZO_DX, y, prezzo)
+                for i, testo in enumerate(caratteristiche, 1):
+                    _scrivi(page, X_DESC, y + i * PASSO, testo)
+                y += (len(caratteristiche) + 1) * PASSO
+                continue
             if elem[0] == "tabella":
                 _, marca, titolo = elem
                 _scrivi(page, X_MARCA, y, marca, 10)
@@ -112,7 +144,7 @@ def crea_catalogo(percorso: str | Path, linee: bool = True) -> Path:
                 _scrivi(page, 527, y, "Listino")
                 y += 13
                 continue
-            modello, descrizione, prezzi = elem
+            modello, descrizione, prezzi, *bollino = elem
             if not linee and len(modello) > 1:
                 modello = [" ".join(modello)]
             righe = max(len(modello), len(descrizione), len(prezzi))
@@ -126,6 +158,8 @@ def crea_catalogo(percorso: str | Path, linee: bool = True) -> Path:
                         _a_destra(page, col, partenza + i * PASSO, testo)
                     else:
                         _scrivi(page, col, partenza + i * PASSO, testo)
+            if bollino:  # in grande sotto il codice, nell'ultima riga della sua cella
+                _scrivi(page, X_ART, y + (righe - 1) * PASSO, bollino[0], 12)
             y += righe * PASSO
     doc.save(percorso)
     doc.close()

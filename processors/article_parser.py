@@ -224,6 +224,21 @@ class ParserListino:
             return aspetto_codice(testo)
         return bool(testo)
 
+    def _e_bollino(self, titolo: Riga, righe_ancora: list[Riga], separatori: list[float]) -> bool:
+        """Un testo grande chiuso fra due linee della griglia, nella cella di un codice, e' un bollino
+        («NEW» in corpo 12 sotto il codice, catalogo Etabeta), non un titolo di sezione: non deve tagliare
+        l'articolo ne' diventare la categoria di quelli che seguono (34 articoli sul catalogo).
+
+        Basta che la cella abbia dati per scambiare per bollini anche titoli di sezione veri («Light Pro»)
+        e lasciare passare testo promozionale che il titolo tagliava: provato e scartato.
+        """
+        bordi = sorted(y - self.metr.tolleranza_riga for y in separatori)
+        sopra = [b for b in bordi if b <= titolo.y0]
+        sotto = [b for b in bordi if b > titolo.y0]
+        if not sopra or not sotto:
+            return False
+        return any(sopra[-1] <= r.y0 < sotto[0] and aspetto_codice(_pulito(r.testo)) for r in righe_ancora)
+
     def elabora_pagina(
         self,
         spans: list[Span],
@@ -237,6 +252,8 @@ class ParserListino:
         tol = self.metr.tolleranza_riga
         n_ancora = self._colonna_del_campo(t, self.ancora)
         intest = getattr(t, "intestazioni", [])
+        if separatori and n_ancora is not None:
+            t.titoli = [r for r in t.titoli if not self._e_bollino(r, t.righe.get(n_ancora, []), separatori)]
         # una linea divisoria e' il bordo superiore di una cella, e il riquadro del testo dentro la cella
         # la sfiora da sopra (Etabeta: linea a 59,7, testo da 59,5): taglia quindi una tolleranza piu' in alto,
         # o la prima riga di ogni cella finisce nella cella precedente
@@ -252,15 +269,28 @@ class ParserListino:
             if separatori and not composita:
                 # griglia fitta: ogni cella e' un articolo, qualunque aspetto abbia il modello
                 righe_ancora = [r for r in t.righe.get(n_ancora, []) if _pulito(r.testo)]
-                celle = raggruppamento.celle(righe_ancora, [y - tol for y in separatori],
-                                             [r.y0 for r in t.titoli] + [i.y0 for i in intest[1:]])
+                bordi = [y - tol for y in separatori]
+                tagli_celle = [r.y0 for r in t.titoli] + [i.y0 for i in intest[1:]]
+                celle = raggruppamento.celle(righe_ancora, bordi, tagli_celle)
                 if celle is not None:
                     # una cella e' un articolo se ha un prezzo o un modello con l'aspetto di un codice:
                     # le altre sono testo promozionale caduto nella griglia («Honeywell e' la soluzione...»)
                     n_prezzo = self._colonna_del_campo(t, "prezzo")
                     prezzi_y = [r.y0 for r in t.righe.get(n_prezzo, [])] if n_prezzo is not None else []
-                    celle = [g for g in celle if aspetto_codice(_pulito(g.righe[0].testo))
-                             or any(g.cella[0] <= y < g.cella[1] for y in prezzi_y)]
+                    articoli_celle = [g for g in celle if aspetto_codice(_pulito(g.righe[0].testo))
+                                      or any(g.cella[0] <= y < g.cella[1] for y in prezzi_y)]
+                    tenute = {id(g) for g in articoli_celle}
+                    tutti_bordi = sorted(set(bordi + tagli_celle))
+                    # una cella con un prezzo e' un'altra voce anche senza codice («Master 2500/FC Flight
+                    # case», i cavi al metro): ferma il seguito come un titolo o un testo che non e' un articolo
+                    celle_prezzo = [max((b for b in tutti_bordi if b <= y), default=float("-inf")) for y in prezzi_y]
+                    fermi = ([r.y0 for r in t.titoli] + [i.y0 for i in intest] + celle_prezzo
+                             + [g.cella[0] for g in celle if id(g) not in tenute])
+                    # le altre colonne prendono anche le celle che seguono senza codice ne' prezzo (le
+                    # caratteristiche sotto la prima riga di una scheda prodotto)
+                    fasce_griglia = raggruppamento.fasce_con_seguito(
+                        [g.cella for g in articoli_celle], tutti_bordi, fermi)
+                    celle = articoli_celle
             gruppi = celle if celle is not None else raggruppamento.gruppi(
                 t.righe.get(n_ancora, []),
                 lambda r: self._e_ancora(r, self.ancora, col),
@@ -280,8 +310,8 @@ class ParserListino:
                 fasce = raggruppamento.estensioni(inizi, tagli)
                 resto = [r for r in righe if id(r) not in dentro]
             elif gruppi and getattr(gruppi[0], "cella", None) is not None:
-                # griglia: le altre colonne si dividono sulle stesse celle dell'ancora
-                fasce = [g.cella for g in gruppi]
+                # griglia: le altre colonne si dividono sulle stesse celle dell'ancora, con il loro seguito
+                fasce = fasce_griglia
                 resto = righe
             else:
                 ys = sorted(r.y0 for r in righe)

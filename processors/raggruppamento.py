@@ -88,6 +88,26 @@ def celle(righe: list[Riga], separatori: list[float], tagli: list[float]) -> lis
     return risultato
 
 
+def fasce_con_seguito(celle_articoli: list[tuple[float, float]], bordi: list[float],
+                      fermi: list[float]) -> list[tuple[float, float]]:
+    """Fasce delle colonne diverse dall'ancora in una griglia: la cella dell'articolo piu' le celle che
+    la seguono senza testo nella colonna dell'ancora.
+
+    In una scheda prodotto (Etabeta, pagine 140 e 225) una linea separa la prima riga (codice, titolo,
+    prezzo) dalle caratteristiche, che restano in una cella senza codice: andavano perse, 2.900 righe sul
+    catalogo. Il seguito si ferma alla cella dell'articolo successivo, al primo fermo (titolo, intestazione,
+    cella con un testo che non e' un articolo) e all'ultima linea: sotto l'ultima linea della pagina il
+    testo non e' racchiuso in una cella, e di solito e' promozionale.
+    """
+    out = []
+    for n, (inizio, fine) in enumerate(celle_articoli):
+        limite = celle_articoli[n + 1][0] if n + 1 < len(celle_articoli) else float("inf")
+        limite = min([limite] + [f for f in fermi if f >= fine])
+        chiusi = [b for b in bordi if fine <= b <= limite]
+        out.append((inizio, max(chiusi, default=fine)))
+    return out
+
+
 def estensioni(inizi: list[float], tagli: list[float]) -> list[tuple[float, float]]:
     """Fascia verticale di ogni articolo: dal suo inizio al successivo, o al primo taglio che incontra."""
     out = []
