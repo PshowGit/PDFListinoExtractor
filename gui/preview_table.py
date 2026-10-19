@@ -1,4 +1,8 @@
-"""Tabella di anteprima: ordinamento, modifica, eliminazione e filtro delle anomalie."""
+"""Tabella di anteprima: ordinamento, modifica, eliminazione e filtro delle anomalie.
+
+Le colonne sono quelle dell'estrazione (`RisultatoEstrazione.colonne`), seguite da pagina e anomalie:
+nome e ordine li decide il profilo, ordinamento e modifica li decide il ruolo.
+"""
 import tkinter as tk
 from collections.abc import Callable
 from decimal import Decimal
@@ -7,33 +11,26 @@ from tkinter import messagebox, ttk
 import customtkinter as ctk
 
 from processors.data_validator import valida
-from processors.models import Articolo
+from processors.models import COLONNE_STANDARD, TESTO_GENERICO, Articolo, ColonnaUscita
 from processors.price_parser import formatta_prezzo, parse_prezzo
+from processors.profilo import colonne_uscita, normalizza
 
-COLONNE = ("modello", "codice", "ean", "descrizione", "prezzo", "pagina", "note")
-TITOLI = {
-    "modello": "Modello",
-    "codice": "Codice",
-    "ean": "EAN",
-    "descrizione": "Descrizione",
-    "prezzo": "Prezzo",
-    "pagina": "Pag.",
-    "note": "Anomalie",
-}
-LARGHEZZE = {"modello": 170, "codice": 160, "ean": 110, "descrizione": 420, "prezzo": 90, "pagina": 45, "note": 260}
-MODIFICABILI = {"modello", "codice", "ean", "descrizione", "prezzo"}
+# dopo le colonne del documento: non modificabili, non esportate
+FISSE = (ColonnaUscita("pagina", "Pag.", "pagina"), ColonnaUscita("note", "Anomalie", "note"))
+LARGHEZZE = {"modello": 170, "codice": 160, "ean": 110, "descrizione": 420, "prezzo": 90, TESTO_GENERICO: 140,
+             "pagina": 45, "note": 260}
 
 
-def _chiave_ordinamento(campo: str):
+def _chiave_ordinamento(col: ColonnaUscita):
     def chiave(a: Articolo):
-        if campo == "prezzo":
+        if col.ruolo == "prezzo":
             # i prezzi mancanti in fondo, qualunque sia il verso
             return (a.prezzo is None, a.prezzo if a.prezzo is not None else Decimal(0))
-        if campo == "pagina":
+        if col.ruolo == "pagina":
             return (a.pagina, a.bbox[1])
-        if campo == "note":
+        if col.ruolo == "note":
             return (not a.tutte_le_anomalie(), "; ".join(a.tutte_le_anomalie()))
-        return (getattr(a, campo) or "").lower()
+        return (a.valore(col.chiave) or "").lower()
 
     return chiave
 
@@ -57,17 +54,13 @@ class PreviewTable(ctk.CTkFrame):
         self._verso: dict[str, bool] = {}
         self._editor: tk.Widget | None = None
         self._prossimo_id = 0
+        self.colonne: list[ColonnaUscita] = (
+            colonne_uscita(normalizza(regole)) if regole.get("colonne") else list(COLONNE_STANDARD)
+        )
 
         self._stile()
-        self.tree = ttk.Treeview(self, columns=COLONNE, show="headings", selectmode="extended")
-        for c in COLONNE:
-            self.tree.heading(c, text=TITOLI[c], command=lambda c=c: self.ordina(c))
-            self.tree.column(
-                c,
-                width=LARGHEZZE[c],
-                anchor="e" if c in ("prezzo", "pagina") else "w",
-                stretch=c in ("descrizione", "note"),
-            )
+        self.tree = ttk.Treeview(self, show="headings", selectmode="extended")
+        self._configura_colonne()
         self.tree.tag_configure("anomalia", background="#FFE3C2", foreground="#000000")
         sy = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         sx = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
@@ -94,9 +87,31 @@ class PreviewTable(ctk.CTkFrame):
         stile.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
         stile.map("Treeview", background=[("selected", "#1F6AA5")], foreground=[("selected", "#FFFFFF")])
 
+    def _tutte(self) -> list[ColonnaUscita]:
+        return [*self.colonne, *FISSE]
+
+    def _colonna(self, chiave: str) -> ColonnaUscita:
+        return next(c for c in self._tutte() if c.chiave == chiave)
+
+    def _configura_colonne(self) -> None:
+        self.tree.configure(columns=[c.chiave for c in self._tutte()])
+        self._verso.clear()
+        for c in self._tutte():
+            self.tree.heading(c.chiave, text=c.etichetta, command=lambda k=c.chiave: self.ordina(k))
+            self.tree.column(
+                c.chiave,
+                width=LARGHEZZE[c.ruolo],
+                anchor="e" if c.ruolo in ("prezzo", "pagina") else "w",
+                stretch=c.ruolo in ("descrizione", "note"),
+            )
+
     # --- dati -------------------------------------------------------------------------------
 
-    def carica(self, articoli: list[Articolo]) -> None:
+    def carica(self, articoli: list[Articolo], colonne: list[ColonnaUscita] | None = None) -> None:
+        """Mostra gli articoli; con `colonne` (quelle dell'estrazione) la tabella prende le sue colonne."""
+        if colonne is not None and list(colonne) != self.colonne:
+            self.colonne = list(colonne)
+            self._configura_colonne()
         self._articoli.clear()
         self._ordine.clear()
         for a in articoli:
@@ -128,15 +143,12 @@ class PreviewTable(ctk.CTkFrame):
     # --- vista ------------------------------------------------------------------------------
 
     def _valori(self, a: Articolo) -> tuple:
-        return (
-            a.modello,
-            a.codice,
-            a.ean,
-            a.descrizione.replace("\n", " "),
-            formatta_prezzo(a.prezzo) if a.prezzo is not None else (a.prezzo_testo or ""),
-            a.pagina,
-            "; ".join(a.tutte_le_anomalie()),
-        )
+        def testo(c: ColonnaUscita):
+            if c.ruolo == "prezzo":
+                return formatta_prezzo(a.prezzo) if a.prezzo is not None else (a.prezzo_testo or "")
+            return str(a.valore(c.chiave) or "").replace("\n", " ")
+
+        return (*(testo(c) for c in self.colonne), a.pagina, "; ".join(a.tutte_le_anomalie()))
 
     def _ridisegna(self) -> None:
         selezione = set(self.tree.selection())
@@ -158,15 +170,16 @@ class PreviewTable(ctk.CTkFrame):
             self.on_change()
 
     def ordina(self, campo: str) -> None:
+        col = self._colonna(campo)
         discendente = self._verso.get(campo, False)
-        chiave = _chiave_ordinamento(campo)
+        chiave = _chiave_ordinamento(col)
         self._ordine.sort(key=lambda i: chiave(self._articoli[i]), reverse=discendente)
-        if campo == "prezzo" and discendente:  # tieni comunque i mancanti in fondo
+        if col.ruolo == "prezzo" and discendente:  # tieni comunque i mancanti in fondo
             self._ordine.sort(key=lambda i: self._articoli[i].prezzo is None)
         self._verso[campo] = not discendente
-        for c in COLONNE:
-            freccia = (" ▼" if discendente else " ▲") if c == campo else ""
-            self.tree.heading(c, text=TITOLI[c] + freccia)
+        for c in self._tutte():
+            freccia = (" ▼" if discendente else " ▲") if c.chiave == campo else ""
+            self.tree.heading(c.chiave, text=c.etichetta + freccia)
         self._ridisegna()
 
     def elimina_selezionati(self, chiedi_conferma: bool = False) -> int:
@@ -188,7 +201,7 @@ class PreviewTable(ctk.CTkFrame):
     def modifica_campo(self, iid: str, campo: str, testo: str) -> bool:
         """Applica una correzione dell'utente. Ritorna False se il valore non e' accettabile."""
         a = self._articoli[iid]
-        if campo == "prezzo":
+        if self._colonna(campo).ruolo == "prezzo":
             testo = testo.strip()
             if not testo:
                 a.imposta("prezzo", None)
@@ -213,10 +226,12 @@ class PreviewTable(ctk.CTkFrame):
         colonna = self.tree.identify_column(evento.x)
         if not iid or not colonna:
             return
-        campo = COLONNE[int(colonna[1:]) - 1]
-        if campo not in MODIFICABILI:
+        indice = int(colonna[1:]) - 1
+        if indice >= len(self.colonne):  # pagina e anomalie non si modificano
             return
-        if campo == "descrizione":
+        col = self.colonne[indice]
+        campo = col.chiave
+        if col.ruolo == "descrizione":
             self._modifica_descrizione(iid)
         else:
             self._modifica_in_linea(iid, campo, colonna)
@@ -225,8 +240,9 @@ class PreviewTable(ctk.CTkFrame):
         self._chiudi_editor()
         x, y, w, h = self.tree.bbox(iid, colonna)
         a = self._articoli[iid]
-        iniziale = formatta_prezzo(a.prezzo) if campo == "prezzo" and a.prezzo is not None else (
-            a.prezzo_testo if campo == "prezzo" else getattr(a, campo)
+        prezzo = self._colonna(campo).ruolo == "prezzo"
+        iniziale = formatta_prezzo(a.prezzo) if prezzo and a.prezzo is not None else (
+            a.prezzo_testo if prezzo else a.valore(campo)
         )
         entry = tk.Entry(self.tree)
         entry.insert(0, iniziale)

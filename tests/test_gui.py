@@ -283,3 +283,30 @@ def test_wizard_in_modifica_riprende_e_aggiorna_il_fornitore(radice, tmp_path, m
     assert salvato["nome"] == "ACME Audio" and salvato["colonne"][2]["campo"] == "ean"
     assert salvato["escludi"] == ["PROMO"]  # cio' che il wizard non mostra resta
     assert set(config.chiavi_personali()) == {"acme"}
+
+
+def test_tabella_con_le_colonne_dell_estrazione(radice):
+    from gui.preview_table import PreviewTable
+    from processors.models import Articolo, ColonnaUscita
+
+    colonne = [ColonnaUscita("modello", "Articolo", "modello"), ColonnaUscita("testo_1", "Colore", "testo_generico"),
+               ColonnaUscita("prezzo", "Listino", "prezzo")]
+    regole = {"nome": "X", "colonne": [{"campo": "modello"}, {"campo": "testo_generico"}, {"campo": "prezzo"}]}
+    t = PreviewTable(radice, regole)
+    arts = [Articolo("B-2", prezzo=Decimal("5.00"), pagina=1, altri={"testo_1": "Rosso"}),
+            Articolo("A-1", pagina=1, note_estrazione={"testo_1": "Testo in piu' a pagina 2"}),
+            Articolo("C-3", prezzo=Decimal("2.50"), pagina=2)]
+    t.carica(arts, colonne)
+    assert t.tree["columns"] == ("modello", "testo_1", "prezzo", "pagina", "note")
+    assert [t.tree.heading(c, "text") for c in ("modello", "testo_1", "prezzo")] == ["Articolo", "Colore", "Listino"]
+    assert t.tree.item(t.tree.get_children()[0], "values")[:3] == ("B-2", "Rosso", "5,00")
+    for _ in range(2):  # crescente e decrescente: il prezzo mancante resta in fondo
+        t.ordina("prezzo")
+        assert t.articoli()[-1].modello == "A-1"
+    t.ordina("testo_1")
+    assert [a.modello for a in t.articoli()][-1] == "B-2"  # "" < "rosso"
+    iid = next(i for i in t.tree.get_children() if t.articolo(i).modello == "A-1")
+    assert t.modifica_campo(iid, "testo_1", " Blu ")
+    a = t.articolo(iid)
+    assert a.altri["testo_1"] == "Blu" and "testo_1" not in a.note_estrazione
+    assert a.anomalie == ["Prezzo mancante"]  # anomalie ricalcolate: il profilo prevede il prezzo

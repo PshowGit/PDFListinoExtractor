@@ -84,7 +84,7 @@ def _collauda(pdf: Path, xlsx: Path, report: dict) -> None:
             tempi["fine"] = time.perf_counter()
             app.update()
             articoli = app.tabella.articoli()
-            n_esportate = esporta_listino(articoli, xlsx)
+            n_esportate = esporta_listino(articoli, xlsx, app.tabella.colonne)
             ws = load_workbook(xlsx)["Listino"]
             x, y = app.winfo_rootx(), app.winfo_rooty()
             ImageGrab.grab((x, y, x + app.winfo_width(), y + app.winfo_height())).save(

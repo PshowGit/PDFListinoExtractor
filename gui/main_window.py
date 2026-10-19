@@ -254,7 +254,7 @@ class FinestraPrincipale(ctk.CTk):
     def _estrazione_finita(self, ris: RisultatoEstrazione):
         self._lavoro = None
         self._aggiorna_pulsanti()
-        self.tabella.carica(ris.articoli)
+        self.tabella.carica(ris.articoli, ris.colonne)  # le colonne che il documento ha
         self.barra.set(1)
         n, _ = self.tabella.conteggi()
         testo = f"Completato: {ris.pagine_totali} pagine · {n} articoli"
@@ -318,14 +318,15 @@ class FinestraPrincipale(ctk.CTk):
         self.dettaglio.configure(state="normal")
         self.dettaglio.delete("1.0", "end")
         if a is not None:
-            righe = [
-                (
-                    f"{a.modello}   {a.codice}   EAN {a.ean or '—'}   ·   "
-                    f"{formatta_prezzo(a.prezzo) or a.prezzo_testo or 'senza prezzo'} €   ·   "
-                    f"pag. {a.pagina}   ·   {a.categoria}"
-                ),
-                a.descrizione,
-            ]
+            colonne = self.tabella.colonne
+            dati = "   ".join(f"{c.etichetta} {a.valore(c.chiave) or '—'}" for c in colonne
+                               if c.ruolo not in ("descrizione", "prezzo"))
+            prezzo = ""
+            if any(c.ruolo == "prezzo" for c in colonne):
+                prezzo = f"{formatta_prezzo(a.prezzo) or a.prezzo_testo or 'senza prezzo'} €   ·   "
+            righe = [f"{dati}   ·   {prezzo}pag. {a.pagina}   ·   {a.categoria}"]
+            if any(c.ruolo == "descrizione" for c in colonne):
+                righe.append(a.descrizione)
             if a.tutte_le_anomalie():
                 righe.append("⚠ " + " · ".join(a.tutte_le_anomalie()))
             self.dettaglio.insert("1.0", "\n".join(righe))
@@ -381,7 +382,7 @@ class FinestraPrincipale(ctk.CTk):
         if not percorso:
             return
         try:
-            n = esporta_listino(articoli, percorso)
+            n = esporta_listino(articoli, percorso, self.tabella.colonne)
         except EsportazioneFallita as e:
             messagebox.showerror("Esportazione non riuscita", str(e), parent=self)
             return
@@ -403,7 +404,7 @@ class FinestraPrincipale(ctk.CTk):
         if not percorso:
             return
         try:
-            n = esporta_report_anomalie(articoli, percorso)
+            n = esporta_report_anomalie(articoli, percorso, self.tabella.colonne)
         except EsportazioneFallita as e:
             messagebox.showerror("Esportazione non riuscita", str(e), parent=self)
             return

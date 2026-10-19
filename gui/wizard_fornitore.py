@@ -420,7 +420,7 @@ class WizardFornitore(ctk.CTkToplevel):
     def _anteprima_pronta(self, ris, profilo: dict):
         self._lavoro = None
         self.tabella.regole = normalizza(profilo)
-        self.tabella.carica(ris.articoli)
+        self.tabella.carica(ris.articoli, ris.colonne)
         n, anomali = self.tabella.conteggi()
         self.lbl_anteprima.configure(
             text=f"Anteprima pagina {self.pagina}: {n} articoli · {anomali} da verificare · "
