@@ -16,8 +16,8 @@ from extractors.table_extractor import linee_divisorie
 from extractors.text_extractor import estrai_span
 from processors.article_parser import ParserListino
 from processors.data_validator import valida
-from processors.models import Articolo, Span
-from processors.profilo import normalizza
+from processors.models import COLONNE_STANDARD, Articolo, ColonnaUscita, Span
+from processors.profilo import colonne_uscita, normalizza
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +39,8 @@ class RisultatoEstrazione:
     pagine_saltate: list[int] = field(default_factory=list)
     avvisi: list[str] = field(default_factory=list)
     ancora: str = ""  # campo su cui sono stati individuati gli articoli
+    # colonne della tabella e del foglio "Listino", dal profilo: solo quelle che il documento ha
+    colonne: list[ColonnaUscita] = field(default_factory=lambda: list(COLONNE_STANDARD))
 
 
 @dataclass
@@ -69,7 +71,7 @@ def estrai_listino(
         cfg_ocr = regole["ocr"]
         minimi = cfg_ocr.get("caratteri_minimi_pagina", 20)
         divisorie = regole["spaziatura"]["linee_divisorie"]
-        ris = RisultatoEstrazione([], doc.page_count)
+        ris = RisultatoEstrazione([], doc.page_count, colonne=colonne_uscita(regole))
         indici = _campione(doc.page_count, solo_pagine) if solo_pagine else range(doc.page_count)
         ocr_ok: bool | None = None
         pagine: list[_Pagina] = []

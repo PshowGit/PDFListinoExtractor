@@ -35,9 +35,8 @@ def valida(articoli: list[Articolo], regole: dict | None = None) -> None:
     # (trovato nel wizard col PDF generico). Senza profilo valgono tutti i campi.
     previsti = set(CAMPI_DATI)
     if regole.get("colonne"):
+        # le colonne di testo in piu' non hanno controlli: sono testo libero
         previsti = campi_mappati(normalizza(regole))
-        if regole.get("descrizione_vuota_usa_modello", True) and "modello" in previsti:
-            previsti.add("descrizione")
 
     pagine_per_chiave: dict[str, list[int]] = defaultdict(list)
     for a in articoli:

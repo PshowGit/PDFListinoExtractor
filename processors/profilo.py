@@ -9,8 +9,10 @@ import functools
 import re
 import unicodedata
 
+from processors.models import INTESTAZIONI, TESTO_GENERICO, ColonnaUscita
+
 CAMPI_DATI = ("modello", "codice", "ean", "descrizione", "prezzo")
-CAMPI_COLONNA = (*CAMPI_DATI, "identificativo", "ignora")
+CAMPI_COLONNA = (*CAMPI_DATI, "identificativo", TESTO_GENERICO, "ignora")
 CAMPI_ANCORA = ("codice", "ean", "modello", "prezzo")  # ordine di preferenza nella scelta automatica
 CONTIENE_PREDEFINITO = ["modello", "codice", "ean"]
 
@@ -151,13 +153,47 @@ def normalizza(profilo: dict, sinonimi_extra: dict | None = None) -> dict:
 
 
 def campi_mappati(profilo: dict) -> set[str]:
+    """I cinque campi standard che il profilo prevede (le colonne di testo non sono campi del motore)."""
     campi: set[str] = set()
     for c in profilo["colonne"]:
         if c["campo"] == "identificativo":
             campi.update(c.get("contiene", CONTIENE_PREDEFINITO))
-        elif c["campo"] != "ignora":
+        elif c["campo"] not in ("ignora", TESTO_GENERICO):
             campi.add(c["campo"])
     return campi
+
+
+def chiavi_testo(profilo: dict) -> dict[int, str]:
+    """Indice della colonna del profilo -> chiave della sua colonna di testo ("testo_1", "testo_2"...)."""
+    indici = [i for i, c in enumerate(profilo["colonne"]) if c["campo"] == TESTO_GENERICO]
+    return {i: f"testo_{n}" for n, i in enumerate(indici, 1)}
+
+
+def colonne_uscita(profilo: dict) -> list[ColonnaUscita]:
+    """Le colonne della tabella e del foglio "Listino", nell'ordine del profilo: solo quelle che ci sono.
+
+    Una colonna composita ne da' una per campo impilato (JBL: tre colonne fisiche, cinque in uscita);
+    le colonne da ignorare non ne danno; un campo standard compare una volta sola anche se lo scrivono
+    due colonne del PDF (il parser le unisce). Il nome e' l'`etichetta` del profilo, se c'e', altrimenti
+    quello standard: un profilo salvato prima delle colonne dinamiche esporta come prima.
+    """
+    testo = chiavi_testo(profilo)
+    out: list[ColonnaUscita] = []
+    visti: set[str] = set()
+    for i, c in enumerate(profilo["colonne"]):
+        campo = c["campo"]
+        if campo == TESTO_GENERICO:
+            n = len([k for k in testo if k <= i])
+            nome = c.get("etichetta") or next(iter(c.get("intestazioni") or []), "") or f"Testo {n}"
+            out.append(ColonnaUscita(testo[i], nome, TESTO_GENERICO))
+            continue
+        campi = c.get("contiene", CONTIENE_PREDEFINITO) if campo == "identificativo" else [campo]
+        for f in campi:
+            if f in CAMPI_DATI and f not in visti:
+                visti.add(f)
+                nome = (c.get("etichetta") if campo != "identificativo" else None) or INTESTAZIONI[f]
+                out.append(ColonnaUscita(f, nome, f))
+    return out
 
 
 def chiave_da_nome(nome: str, esistenti: set[str] | frozenset = frozenset()) -> str:

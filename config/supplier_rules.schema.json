@@ -27,7 +27,11 @@
       "type": "object",
       "required": ["campo"],
       "properties": {
-        "campo": {"enum": ["modello", "codice", "ean", "descrizione", "prezzo", "identificativo", "ignora"]},
+        "campo": {"enum": ["modello", "codice", "ean", "descrizione", "prezzo", "identificativo", "testo_generico", "ignora"]},
+        "etichetta": {
+          "description": "Nome della colonna nella tabella e nel foglio Listino; senza, il nome standard del campo.",
+          "type": "string", "minLength": 1
+        },
         "intestazioni": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "x_relativo": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
         "x_fine_relativo": {

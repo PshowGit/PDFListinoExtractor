@@ -27,9 +27,9 @@ from extractors.table_extractor import (
 )
 from processors import raggruppamento
 from processors.data_validator import ean_valido
-from processors.models import Articolo, Span
+from processors.models import CAMPI, TESTO_GENERICO, Articolo, Span
 from processors.price_parser import RisultatoPrezzo, parse_prezzo
-from processors.profilo import CAMPI_ANCORA, CONTIENE_PREDEFINITO, normalizza
+from processors.profilo import CAMPI_ANCORA, CONTIENE_PREDEFINITO, chiavi_testo, normalizza
 
 _SPAZI = re.compile(r"\s+")
 # il campo d'ancoraggio deve coprire almeno questa quota delle righe del campo piu' denso
@@ -91,6 +91,7 @@ class ParserListino:
         self.re_ean = re.compile(rx["ean"]) if rx.get("ean") else None
         self.re_prezzo = re.compile(rx["prezzo"]) if rx.get("prezzo") else None
         self.re_escludi = [re.compile(e) for e in self.p.get("escludi", [])]
+        self.chiavi_testo = chiavi_testo(self.p)  # indice della colonna del profilo -> "testo_1"...
         self.metr: Metriche | None = None
         self.firme: set = set()
         self.ancora: str | None = None if self.p["ancora"] == "auto" else self.p["ancora"]
@@ -371,9 +372,9 @@ class ParserListino:
                         f"Altro prezzo trovato a pagina {pagina} (colonna «{col.etichetta}»): «{righe[0].testo}» — verificare"
                     )
             else:
-                campo = campi[0]
-                if not getattr(art, campo):
-                    setattr(art, campo, unisci_righe(testi))
+                campo = self._chiave(col)
+                if not art.valore(campo):
+                    self._scrivi(art, campo, unisci_righe(testi))
                 else:
                     art.note_estrazione[campo] = (
                         f"Testo in piu' a pagina {pagina} (colonna «{col.etichetta}»): «{unisci_righe(testi)[:60]}»"
@@ -399,16 +400,18 @@ class ParserListino:
                 prezzi_visti = True
             elif pc["campo"] == "codice":
                 self._codice(art, unisci_righe([r.testo for r in righe]), col)
-            elif pc["campo"] in ("modello", "ean", "descrizione"):
+            elif pc["campo"] in ("modello", "ean", "descrizione", TESTO_GENERICO):
+                chiave = self._chiave(col)
                 testo = unisci_righe([r.testo for r in righe])
-                attuale = getattr(art, pc["campo"])
-                setattr(art, pc["campo"], unisci_righe([attuale, testo]) if attuale else testo)
+                attuale = art.valore(chiave)
+                self._scrivi(art, chiave, unisci_righe([attuale, testo]) if attuale else testo)
         mappati = self._campi_mappati(t)
         if not prezzi_visti and "prezzo" in mappati:
             art.note_estrazione["prezzo"] = "Prezzo mancante"
         if not art.codice and "codice" in mappati and "codice" not in art.note_estrazione:
             art.note_estrazione["codice"] = "Codice non trovato"
-        if not art.descrizione and self.p["descrizione_vuota_usa_modello"] and art.modello:
+        # solo se il profilo ha una colonna Descrizione: senza, non c'e' una descrizione da riempire
+        if not art.descrizione and self.p["descrizione_vuota_usa_modello"] and art.modello and "descrizione" in mappati:
             art.descrizione = art.modello
             # non e' un'anomalia: serve a sapere che una prosecuzione a pagina nuova la sostituisce
             art.descrizione_da_modello = True
@@ -421,6 +424,19 @@ class ParserListino:
             art.da_ocr = True
             art.confidenza_minima = min(confidenze)
         return art
+
+    def _chiave(self, col: ColonnaFisica) -> str:
+        """Dove va il testo di una colonna semplice: il suo campo, o "testo_N" per una colonna di testo."""
+        campo = self._profilo_colonna(col)["campo"]
+        return self.chiavi_testo[col.indice] if campo == TESTO_GENERICO else campo
+
+    @staticmethod
+    def _scrivi(art: Articolo, chiave: str, valore: str) -> None:
+        # non `imposta`: quella e' la correzione dell'utente e cancella le note dell'estrazione
+        if chiave in CAMPI:
+            setattr(art, chiave, valore)
+        else:
+            art.altri[chiave] = valore
 
     def _campi_mappati(self, t: _Tabella) -> set[str]:
         return {c for col in t.colonne if col.indice is not None for c in self._campi_colonna(col)}

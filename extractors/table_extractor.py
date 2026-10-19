@@ -235,9 +235,11 @@ def _intestazione_da(righe_pagina, n, profilo, metr, larghezza):
             colonne.append(ColonnaFisica(s.x0, None, s.testo, s.x1))
     colonne.sort(key=lambda c: c.x)
     # categoria: le etichette che non sono il nome di un campo (marca, titolo della tabella), anche se il
-    # profilo le ha salvate come intestazione della loro colonna
+    # profilo le ha salvate come intestazione della loro colonna; tranne il nome di una colonna di testo
+    # («Colore»), che e' un'etichetta fissa come le altre
+    di_testo = {id(s) for i, s in riconosciute.items() if profilo["colonne"][i]["campo"] == "testo_generico"}
     categoria = [s.testo for s in sorted(riga.spans, key=lambda s: s.x0)
-                 if campo_da_intestazione(s.testo, profilo.get("sinonimi"))[0] is None]
+                 if id(s) not in di_testo and campo_da_intestazione(s.testo, profilo.get("sinonimi"))[0] is None]
     intest = Intestazione(riga.y0, riga.y1, colonne, categoria)
     corpo_etichette = statistics.median(s.size for s in riga.spans)
     # seconda riga di un'etichetta ("Prezzo al" / "Pubblico"): subito sotto, allineata a

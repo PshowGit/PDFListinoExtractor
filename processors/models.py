@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-# Campi esportati, nell'ordine delle colonne del foglio "Listino".
+# I cinque campi con un ruolo per il motore (ancora, regex, formato) e il loro nome standard.
 CAMPI = ("modello", "codice", "ean", "descrizione", "prezzo")
 INTESTAZIONI = {
     "modello": "Modello",
@@ -11,6 +11,25 @@ INTESTAZIONI = {
     "descrizione": "Descrizione",
     "prezzo": "Prezzo",
 }
+TESTO_GENERICO = "testo_generico"  # ruolo di una colonna in piu' (colore, note...): solo testo
+
+
+@dataclass(frozen=True)
+class ColonnaUscita:
+    """Una colonna della tabella e del foglio "Listino": quali e in che ordine le decide il profilo.
+
+    `chiave` e' il nome del campo per i cinque standard e "testo_1", "testo_2"... per le colonne di
+    testo; `etichetta` e' il nome mostrato ed esportato; `ruolo` dice al motore e all'export come
+    trattarla (uno dei CAMPI o TESTO_GENERICO).
+    """
+
+    chiave: str
+    etichetta: str
+    ruolo: str
+
+
+# Le colonne di un profilo che non dice altro, come prima delle colonne dinamiche.
+COLONNE_STANDARD = tuple(ColonnaUscita(c, INTESTAZIONI[c], c) for c in CAMPI)
 
 
 @dataclass(frozen=True)
@@ -47,12 +66,20 @@ class Articolo:
     note_estrazione: dict[str, str] = field(default_factory=dict)
     # Anomalie del validatore: ricalcolate da zero a ogni validazione.
     anomalie: list[str] = field(default_factory=list)
+    # Valori delle colonne di testo in piu', per chiave ("testo_1"...): i cinque campi restano attributi.
+    altri: dict[str, str] = field(default_factory=dict)
 
     def tutte_le_anomalie(self) -> list[str]:
         return list(self.note_estrazione.values()) + self.anomalie
 
+    def valore(self, chiave: str):
+        return getattr(self, chiave) if chiave in CAMPI else self.altri.get(chiave, "")
+
     def imposta(self, campo: str, valore) -> None:
-        setattr(self, campo, valore)
+        if campo in CAMPI:
+            setattr(self, campo, valore)
+        else:
+            self.altri[campo] = valore
         self.note_estrazione.pop(campo, None)
         if campo == "descrizione":
             self.descrizione_da_modello = False
