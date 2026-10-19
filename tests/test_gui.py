@@ -48,6 +48,23 @@ def test_il_filtro_anomalie_non_riduce_l_esportazione(tabella):
     assert len(tabella.articoli()) == 9
 
 
+def test_filtro_per_tipo_di_anomalia(tabella):
+    from gui.preview_table import DA_VERIFICARE, TUTTE
+
+    tipi = dict(tabella.tipi_anomalia())
+    assert tipi["Duplicato"] == 2 and tipi["Prezzo mancante"] >= 1
+    tabella.imposta_filtro("Duplicato")
+    assert tabella.mostrate() == 2
+    assert {tabella.articolo(i).codice for i in tabella.tree.get_children()} == {"(00123-A)"}
+    tabella.imposta_filtro(DA_VERIFICARE)
+    assert tabella.mostrate() == tabella.conteggi()[1]
+    tabella.imposta_filtro(TUTTE)
+    assert tabella.mostrate() == 9
+    # il conteggio riguarda tutte le righe, non solo quelle mostrate
+    tabella.imposta_filtro("Prezzo mancante")
+    assert dict(tabella.tipi_anomalia()) == tipi
+
+
 def test_correggere_il_prezzo_toglie_l_anomalia(tabella):
     iid = next(i for i in tabella.tree.get_children() if tabella.articolo(i).codice == "(SPK-003)")
     assert tabella.articolo(iid).tutte_le_anomalie()
@@ -347,6 +364,37 @@ def test_colonne_dinamiche_dal_pdf_all_excel(radice, tmp_path, variante):
         assert not {"Codice", "EAN"} & set(intestazioni)
     else:
         assert ws.cell(2, intestazioni.index("Colour") + 1).number_format == "@"
+
+
+def test_menu_del_filtro_coi_contatori(radice, tmp_path, monkeypatch, pdf_sintetico, regole):
+    from gui.main_window import FinestraPrincipale
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    radice.destroy()
+    app = FinestraPrincipale()
+    app.withdraw()
+    try:
+        app.tabella.carica(estrai_listino(pdf_sintetico, regole).articoli)
+        app._aggiorna_contatori()
+        n, anomali = app.tabella.conteggi()
+        voci = app.menu_filtro.cget("values")
+        assert voci[:2] == [f"Tutte le righe ({n})", f"Da verificare ({anomali})"]
+        assert "Duplicato (2)" in voci
+        app._filtro("Duplicato (2)")
+        assert app.tabella.mostrate() == 2 and app.menu_filtro.get() == "Duplicato (2)"
+        assert app.lbl_conteggi.cget("text") == f"2 di {n} righe"
+        # eliminare un duplicato aggiorna i contatori; il tipo scelto resta nel menu anche a zero
+        app.tabella.tree.selection_set(app.tabella.tree.get_children()[0])
+        app.tabella.elimina_selezionati()
+        assert app.menu_filtro.get() == "Duplicato (0)" and app.tabella.mostrate() == 0
+        assert f"Da verificare ({anomali - 2})" in app.menu_filtro.cget("values")
+    finally:
+        app.destroy()
+    import customtkinter as ctk
+
+    nuova = ctk.CTk()
+    nuova.withdraw()
+    radice.destroy = nuova.destroy
 
 
 def test_dettaglio_con_le_colonne_del_documento(radice, tmp_path, monkeypatch):

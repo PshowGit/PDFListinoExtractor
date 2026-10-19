@@ -536,7 +536,7 @@ class ParserListino:
                 self._composita(art, righe, pc.get("contiene", CONTIENE_PREDEFINITO), col)
             elif pc["campo"] == "prezzo":
                 if prezzi_visti:  # due colonne prezzo: non si sceglie
-                    art.note_estrazione["prezzo"] = f"Prezzo anche nella colonna «{col.etichetta}»: verificare"
+                    art.note_estrazione["prezzo"] = f"Secondo prezzo nella colonna «{col.etichetta}»: verificare"
                 else:
                     self._assegna_prezzo(art, righe, col)
                 prezzi_visti = True

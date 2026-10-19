@@ -127,8 +127,9 @@ uv run python main.py
    e se è testuale o scansionato.
 2. **Estrai articoli**: l'estrazione gira in un processo separato, quindi la finestra resta utilizzabile;
    si può annullare.
-3. **Anteprima**: le righe con anomalie sono evidenziate in arancione (spunta «Solo righe con anomalie»
-   per vedere solo quelle). Si può:
+3. **Anteprima**: le righe con anomalie sono evidenziate in arancione. Il menu **Mostra** fa vedere tutte le
+   righe, solo quelle da verificare o solo quelle con un tipo di anomalia («Prezzo mancante», «Duplicato»,
+   «Marca mancante»…), ognuno col numero di righe; i numeri si aggiornano a ogni correzione. Si può:
    - ordinare cliccando sull'intestazione di una colonna;
    - correggere con un doppio clic su una cella (la descrizione si apre in una finestra);
    - eliminare le righe selezionate (tasto `Canc` o pulsante);

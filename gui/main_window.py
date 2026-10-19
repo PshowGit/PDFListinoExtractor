@@ -12,7 +12,7 @@ from extractors.pdf_reader import InfoPdf, PdfNonValido, verifica_pdf
 from gui.dialoghi import chiedi_testo
 from gui.lavoro import LavoroInProcesso
 from gui.page_viewer import FinestraPagina
-from gui.preview_table import PreviewTable
+from gui.preview_table import DA_VERIFICARE, TUTTE, PreviewTable
 from percorsi import icona
 from processors.estrazione import RisultatoEstrazione
 from processors.lavori import ESTRAZIONE
@@ -188,6 +188,7 @@ class FinestraPrincipale(ctk.CTk):
             else f"testuale ({info.pagine_con_testo} pagine con testo selezionabile)"
         )
         self.lbl_info.configure(text=f"✔ PDF leggibile · {info.pagine} pagine · {tipo}", text_color="gray")
+        self.tabella.imposta_filtro(TUTTE)
         self.tabella.carica([])
         self._aggiorna_contatori()
         self._aggiorna_pulsanti()
@@ -254,6 +255,7 @@ class FinestraPrincipale(ctk.CTk):
     def _estrazione_finita(self, ris: RisultatoEstrazione):
         self._lavoro = None
         self._aggiorna_pulsanti()
+        self.tabella.imposta_filtro(TUTTE)  # un'estrazione nuova si guarda dall'inizio
         self.tabella.carica(ris.articoli, ris.colonne)  # le colonne che il documento ha
         self.barra.set(1)
         n, _ = self.tabella.conteggi()
@@ -277,19 +279,23 @@ class FinestraPrincipale(ctk.CTk):
         barra = ctk.CTkFrame(f, fg_color="transparent")
         barra.grid(row=0, column=0, sticky="ew", padx=6, pady=(8, 4))
         ctk.CTkLabel(barra, text="3. Anteprima", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=4)
-        self.lbl_conteggi = ctk.CTkLabel(barra, text="")
-        self.lbl_conteggi.pack(side="left", padx=12)
-        self.chk_anomalie = ctk.CTkCheckBox(barra, text="Solo righe con anomalie", command=self._filtro)
-        self.chk_anomalie.pack(side="left", padx=12)
+        ctk.CTkLabel(barra, text="Mostra:").pack(side="left", padx=(16, 4))
+        # tutte le righe, quelle da verificare o un tipo di anomalia, ognuno col suo conteggio
+        self._voci_filtro: dict[str, str | None] = {"Tutte le righe": TUTTE}
+        self.menu_filtro = ctk.CTkOptionMenu(barra, values=list(self._voci_filtro), command=self._filtro,
+                                             width=260, dynamic_resizing=False)
+        self.menu_filtro.pack(side="left")
+        self.lbl_conteggi = ctk.CTkLabel(barra, text="")  # le righe mostrate su quelle estratte
+        self.lbl_conteggi.pack(side="left", padx=10)
         self.btn_pagina = ctk.CTkButton(barra, text="Mostra pagina PDF", command=self._mostra_pagina, width=150)
         self.btn_pagina.pack(side="right", padx=4)
         self.btn_elimina = ctk.CTkButton(
             barra,
-            text="Elimina righe selezionate",
+            text="Elimina selezionate",
             command=lambda: self.tabella.elimina_selezionati(chiedi_conferma=True),
             fg_color="#B04A4A",
             hover_color="#8E3B3B",
-            width=190,
+            width=150,
         )
         self.btn_elimina.pack(side="right", padx=4)
 
@@ -306,12 +312,29 @@ class FinestraPrincipale(ctk.CTk):
         )
         self.dettaglio.configure(state="disabled")
 
-    def _filtro(self):
-        self.tabella.imposta_filtro_anomalie(bool(self.chk_anomalie.get()))
+    def _filtro(self, voce: str):
+        self.tabella.imposta_filtro(self._voci_filtro.get(voce, TUTTE))
+        self._aggiorna_contatori()
 
     def _aggiorna_contatori(self):
+        """Contatori e voci del filtro, ricalcolati dopo ogni estrazione, correzione o eliminazione."""
         n, anomali = self.tabella.conteggi()
-        self.lbl_conteggi.configure(text=f"{n} articoli · {anomali} da verificare" if n else "")
+        filtro = self.tabella.filtro
+        tipi = self.tabella.tipi_anomalia()
+        if filtro not in (TUTTE, DA_VERIFICARE) and filtro not in dict(tipi):
+            tipi.append((filtro, 0))  # il tipo scelto resta nel menu anche quando non ne restano piu'
+        voci = {f"Tutte le righe ({n})": TUTTE, f"Da verificare ({anomali})": DA_VERIFICARE}
+        voci.update({f"{tipo} ({k})": tipo for tipo, k in tipi})
+        self._voci_filtro = voci
+        self.menu_filtro.configure(values=list(voci))
+        self.menu_filtro.set(next(voce for voce, f in voci.items() if f == filtro))
+        if not n:
+            testo = ""
+        elif filtro is TUTTE:
+            testo = f"{n} righe · {anomali} da verificare"
+        else:
+            testo = f"{self.tabella.mostrate()} di {n} righe"
+        self.lbl_conteggi.configure(text=testo)
         self._aggiorna_pulsanti()
 
     def _mostra_dettaglio(self, a: Articolo | None):

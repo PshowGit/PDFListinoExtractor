@@ -10,7 +10,7 @@ from tkinter import messagebox, ttk
 
 import customtkinter as ctk
 
-from processors.data_validator import valida
+from processors.data_validator import conta_tipi, tipo_anomalia, valida
 from processors.models import COLONNE_STANDARD, MARCA, TESTO_GENERICO, Articolo, ColonnaUscita
 from processors.price_parser import formatta_prezzo, parse_prezzo
 from processors.profilo import colonne_uscita, normalizza
@@ -19,6 +19,8 @@ from processors.profilo import colonne_uscita, normalizza
 FISSE = (ColonnaUscita("pagina", "Pag.", "pagina"), ColonnaUscita("note", "Anomalie", "note"))
 LARGHEZZE = {"modello": 170, "codice": 160, "ean": 110, "descrizione": 420, "prezzo": 90, TESTO_GENERICO: 140, MARCA: 130,
              "pagina": 45, "note": 260}
+# filtro della tabella: tutte le righe, quelle con almeno un'anomalia, o quelle con un tipo di anomalia (il suo nome)
+TUTTE, DA_VERIFICARE = None, "__da_verificare__"
 
 
 def _chiave_ordinamento(col: ColonnaUscita):
@@ -50,7 +52,7 @@ class PreviewTable(ctk.CTkFrame):
         self.on_select = on_select
         self._articoli: dict[str, Articolo] = {}
         self._ordine: list[str] = []
-        self._solo_anomalie = False
+        self._filtro: str | None = TUTTE
         self._verso: dict[str, bool] = {}
         self._editor: tk.Widget | None = None
         self._prossimo_id = 0
@@ -136,9 +138,32 @@ class PreviewTable(ctk.CTkFrame):
         tutti = self.articoli()
         return len(tutti), sum(1 for a in tutti if a.tutte_le_anomalie())
 
-    def imposta_filtro_anomalie(self, attivo: bool) -> None:
-        self._solo_anomalie = attivo
+    def tipi_anomalia(self) -> list[tuple[str, int]]:
+        """Tipi di anomalia di tutte le righe (non solo di quelle mostrate), dal piu' frequente."""
+        return conta_tipi(self.articoli())
+
+    @property
+    def filtro(self) -> str | None:
+        return self._filtro
+
+    def imposta_filtro(self, filtro: str | None) -> None:
+        """TUTTE, DA_VERIFICARE o il nome di un tipo di anomalia (v. data_validator.tipo_anomalia)."""
+        self._filtro = filtro
         self._ridisegna()
+
+    def imposta_filtro_anomalie(self, attivo: bool) -> None:
+        self.imposta_filtro(DA_VERIFICARE if attivo else TUTTE)
+
+    def _passa_il_filtro(self, a: Articolo) -> bool:
+        if self._filtro is TUTTE:
+            return True
+        anomalie = a.tutte_le_anomalie()
+        if self._filtro == DA_VERIFICARE:
+            return bool(anomalie)
+        return any(tipo_anomalia(x) == self._filtro for x in anomalie)
+
+    def mostrate(self) -> int:
+        return len(self.tree.get_children())
 
     # --- vista ------------------------------------------------------------------------------
 
@@ -155,7 +180,7 @@ class PreviewTable(ctk.CTkFrame):
         self.tree.delete(*self.tree.get_children())
         for iid in self._ordine:
             a = self._articoli[iid]
-            if self._solo_anomalie and not a.tutte_le_anomalie():
+            if not self._passa_il_filtro(a):
                 continue
             tag = ("anomalia",) if a.tutte_le_anomalie() else ()
             self.tree.insert("", "end", iid=iid, values=self._valori(a), tags=tag)

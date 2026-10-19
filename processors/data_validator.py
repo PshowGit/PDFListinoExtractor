@@ -1,5 +1,6 @@
 """Controlli sugli articoli estratti. Nulla viene corretto o scartato: si segnala soltanto."""
-from collections import defaultdict
+import re
+from collections import Counter, defaultdict
 from decimal import Decimal
 
 from processors.models import Articolo
@@ -19,6 +20,27 @@ def ean_valido(ean: str) -> bool:
 
 def _parentesi_sbilanciate(testo: str) -> bool:
     return testo.count("(") != testo.count(")")
+
+
+# fin dove un'anomalia dice il suo tipo: dopo vengono i dettagli (valore, colonna, pagine)
+_DETTAGLI = re.compile(r"[:(«—]")
+_VARIABILI = re.compile(r"\s+(a pagina \d+|nella colonna)\s*$")
+
+
+def tipo_anomalia(testo: str) -> str:
+    """Il tipo di un'anomalia, senza i dettagli che cambiano da un articolo all'altro.
+
+    «Duplicato: compare 3 volte (pag. 4, 7)» -> «Duplicato»; «Prezzo non riconosciuto: «€ —» (colonna
+    «Listino»)» -> «Prezzo non riconosciuto»; «Testo in piu' a pagina 12 (colonna...)» -> «Testo in piu'».
+    """
+    tipo = _DETTAGLI.split(testo, maxsplit=1)[0].strip()
+    return _VARIABILI.sub("", tipo).strip() or testo.strip()
+
+
+def conta_tipi(articoli: list[Articolo]) -> list[tuple[str, int]]:
+    """Quanti articoli hanno ciascun tipo di anomalia, dal piu' frequente; un articolo conta una volta per tipo."""
+    conteggio = Counter(t for a in articoli for t in {tipo_anomalia(x) for x in a.tutte_le_anomalie()})
+    return sorted(conteggio.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
 def chiave_duplicato(a: Articolo) -> str:
