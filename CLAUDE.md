@@ -12,6 +12,7 @@ Applicazione desktop Windows (Python 3.12, customtkinter) che estrae da un listi
 - Le dipendenze sono gestite con `uv`. I listini reali `samples/Listino_JBL_Gen_2026.pdf` e `samples/Etabeta_Larentis.pdf` sono esclusi da git (materiale commerciale). I test che li usano si saltano se il file manca.
 - **`%LOCALAPPDATA%\PDFListinoExtractor\supplier_rules.json` contiene i fornitori veri dell'utente**, creati col wizard (JBL, GTD, JVL). Non leggerlo per prova, non sovrascriverlo, non cancellarlo. I test usano `monkeypatch.setenv("LOCALAPPDATA", tmp_path)`, e `tools\collaudo_installer.ps1` lancia il programma con una `%LOCALAPPDATA%` di prova in `D:\tmp`. Ogni nuovo collaudo deve fare lo stesso.
 - Inno Setup 6 è installato per utente, in `%LOCALAPPDATA%\Programs\Inno Setup 6`. Tesseract non è installato, quindi il test OCR viene saltato.
+- Windows PowerShell 5.1: `git push` e altri comandi nativi che scrivono su stderr fanno uscire con codice 255 anche quando riescono. Verificare con `git ls-remote` o `git status -sb`, non dal codice d'uscita. Con `gh ... --jq` le virgolette si rompono: meglio `--json` piu' `ConvertFrom-Json`.
 
 ## Comandi
 
@@ -26,9 +27,10 @@ uv run python tools/analizza_pdf.py <pdf> [1,27]        # testo con coordinate, 
 uv run python tools/prova_gui.py <pdf> <out.xlsx>       # collaudo della finestra vera (report .collaudo.json)
 uv run python tools/prova_wizard.py <pdf> <out.png> [pagina]   # collaudo visivo del wizard, non salva nulla
 uv run python tools/misura_copertura.py <pdf> [pagina]  # prezzi del PDF attribuiti a un articolo, con la proposta del wizard
+uv run python tools/misura_copertura.py samples\Etabeta_Larentis.pdf 22   # la misura di riferimento sul catalogo
 ```
 
-`misura_copertura` è la misura di qualità indipendente dal motore. Conta, pagina per pagina, le scritte con la forma di un prezzo e le confronta con gli articoli che ne hanno uno. Una pagina «in eccesso» vuol dire un prezzo inventato, una «con perdite» articoli persi. Sul catalogo Etabeta: 97,4%, 0 pagine in eccesso. Prima di cambiare il motore conviene salvare l'estrazione del JBL in un JSON fuori dal repository e confrontarla campo per campo dopo la modifica: è così che sono stati trovati i difetti di raggruppamento.
+`misura_copertura` è la misura di qualità indipendente dal motore. Conta, pagina per pagina, le scritte con la forma di un prezzo e le confronta con gli articoli che ne hanno uno. Una pagina «in eccesso» vuol dire un prezzo inventato, una «con perdite» articoli persi. Sul catalogo Etabeta, con la proposta del wizard su pagina 22: 97,4%, 0 pagine in eccesso. La pagina va indicata. Senza, vale la pagina 1, che è l'indice: la proposta è sbagliata (6.465 «articoli», colonne «Colonna 1/2/3») e la percentuale non significa nulla. Prima di cambiare il motore conviene salvare in un JSON fuori dal repository l'estrazione del JBL (profilo distribuito e proposta del wizard) e quella dell'Etabeta (proposta su pagina 22), e confrontarle campo per campo dopo la modifica. È così che sono stati trovati i difetti di raggruppamento, e che si vede se una regola cambia i prezzi oltre alle descrizioni.
 
 Distribuzione:
 
@@ -39,7 +41,9 @@ uv run python scripts\imposta_versione.py 1.3.0    rem unica via per cambiare ve
 powershell -ExecutionPolicy Bypass -File tools\collaudo_installer.ps1 <setup_vecchio> <setup_nuovo> <pdf>
 ```
 
-`PDFListinoExtractor.exe --collaudo <pdf> <out.xlsx>` collauda l'eseguibile impacchettato: apre la finestra, estrae, esporta e scrive un report JSON. `--collaudo-wizard <pdf> <regole.json> [pagina]` fa lo stesso col wizard, dall'analisi al salvataggio, scrivendo nel file indicato e non nelle regole dell'utente. Su un catalogo va indicata una pagina con una tabella: la prima è spesso l'indice, e lì la proposta non ha senso. Serve anche a verificare che `jsonschema` e lo schema siano inclusi dal `.spec`. `tools\collaudo_installer.ps1` installa per l'utente corrente, aggiorna, disinstalla e verifica 21 punti; l'installazione in Program Files (UAC) non si può automatizzare.
+`PDFListinoExtractor.exe --collaudo <pdf> <out.xlsx>` collauda l'eseguibile impacchettato: apre la finestra, estrae, esporta e scrive un report JSON. `--collaudo-wizard <pdf> <regole.json> [pagina]` fa lo stesso col wizard, dall'analisi al salvataggio, scrivendo nel file indicato e non nelle regole dell'utente. Su un catalogo va indicata una pagina con una tabella: la prima è spesso l'indice, e lì la proposta non ha senso. Serve anche a verificare che `jsonschema` e lo schema siano inclusi dal `.spec`. `tools\collaudo_installer.ps1` installa per l'utente corrente, aggiorna, disinstalla e verifica 21 punti; l'installazione in Program Files (UAC) non si può automatizzare. Il setup della versione precedente va copiato fuori da `dist` prima di compilare il nuovo, perché viene sovrascritto.
+
+Rilascio, come per le versioni 1.0.0–1.3.0: tag leggero `vX.Y.Z` sul commit «chore: versione X.Y.Z» e release GitHub con `PDFListinoExtractor_Setup.exe` allegato. Le note sono in italiano e scritte per l'utente: Novità, Aggiornamento, Verifiche, SHA-256 del setup.
 
 ## Architettura
 
@@ -73,7 +77,13 @@ Scelte non ovvie, ognuna motivata da una misura o da un difetto reale:
 - **Percorsi** (`percorsi.py`): le risorse sono in sola lettura (`_MEIPASS` nell'eseguibile, che può stare in Program Files). Log e regole personali vanno in `%LOCALAPPDATA%\PDFListinoExtractor`, che aggiornamenti e disinstallazione non toccano. `config.carica_regole` unisce alle regole distribuite quelle di `%LOCALAPPDATA%\PDFListinoExtractor\supplier_rules.json`, letto in `utf-8-sig` perché il Blocco note salva col BOM; se il file è illeggibile o non rispetta lo schema viene ignorato con un avviso e non blocca l'avvio. Un file nella versione 1 (formato della 1.0.0) si legge ancora. Il wizard e i pulsanti «Modifica…»/«Rinomina…»/«Rimuovi» accanto al menu Fornitore scrivono **solo** quel file (`config.salva_`/`rinomina_`/`rimuovi_fornitore_personale`, tutte via `_scrivi_personali`): schema verificato prima di toccare file e copia, file temporaneo + `os.replace`, copia `.bak`, `utf-8-sig`. Si rinominano e si rimuovono solo i fornitori personali (`config.chiavi_personali`); quelli distribuiti restano in sola lettura, e togliere un personale con la stessa chiave rimette in uso quello distribuito. Il nome deve restare unico, maiuscole a parte, perché menu e wizard riconoscono il fornitore dal nome.
 - **Modificare un fornitore nel wizard** (`ModelloWizard.applica_profilo`): le colonne salvate si riabbinano a quelle trovate sulla pagina prima per etichetta, poi per posizione relativa (`abbina_colonne`, fasce contigue fra una colonna e la successiva: un `x_relativo` arrotondato per difetto cadeva fuori). La chiave resta la stessa anche cambiando nome. Al salvataggio `_con_originale` sovrappone la mappatura al profilo com'era: restano `escludi`, `prezzo_massimo`, le regex di EAN e prezzo, le spaziature, una regex del codice personalizzata e le intestazioni aggiunte a mano. Sul JBL, aprire il profilo e salvarlo senza toccare nulla dà gli stessi 673 articoli (`tests/test_universale.py`).
 - **Versione**: l'unica fonte è `version.py`, letto dal titolo della finestra, dal `.spec` (proprietà dell'eseguibile) e da `build_installer.bat`. L'`AppId` in `installer/PDFListinoExtractor.iss` non va mai cambiato, o un aggiornamento verrebbe installato come un programma diverso. `[InstallDelete]` svuota `_internal` a ogni aggiornamento. `EDITORE` resta vuoto finché non se ne indica uno reale.
-- **Formato dell'export**: il codice resta tra parentesi (`codice_con_parentesi`); Modello, Codice ed EAN sono celle di testo (`@`); un prezzo mancante è una cella vuota, non `0`. Dove la colonna Descrizione è vuota (accessori), la descrizione ripete il nome del modello.
+- **Formato dell'export**: il codice resta tra parentesi (`codice_con_parentesi`); Modello, Codice ed EAN sono celle di testo (`@`); un prezzo mancante è una cella vuota, non `0`. Dove la colonna Descrizione è vuota (accessori), la descrizione ripete il nome del modello. Non c'è una colonna Marca. Nell'Etabeta l'«Articolo» finisce in Modello (ancora `modello`) e la marca si trova solo nella categoria, nella forma «MARCA · titolo della tabella».
+- **Limiti noti sull'Etabeta**, misurati e non risolti:
+  - circa 580 articoli senza marca, perché sulle pagine senza intestazione di tabella (225, 270) la marca è solo nel logo, un'immagine;
+  - 74 bollini «NEW» presi per categoria su pagine senza griglia;
+  - testo promozionale di fondo pagina attaccato alla descrizione dell'ultimo articolo;
+  - 228 righe di descrizione ancora perse;
+  - una parola andata a capo col trattino resta col trattino («Alo-ne»).
 
 ## Test
 
