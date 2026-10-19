@@ -1,8 +1,8 @@
 PDFListinoExtractor - Estrattore listini PDF
 ============================================
 
-Legge un listino prezzi PDF e lo salva in Excel con le colonne
-Modello | Codice | EAN | Descrizione | Prezzo.
+Legge un listino prezzi PDF e lo salva in Excel con le colonne che il listino ha, con i loro nomi
+(per il listino JBL incluso: Modello | Codice | EAN | Descrizione | Prezzo).
 
 USO
  1. Seleziona PDF: scegliere il listino.
@@ -14,8 +14,9 @@ USO
 
 UN FORNITORE NUOVO
  "Configura nuovo fornitore..." apre il wizard: si apre il listino, il programma riconosce le colonne e
- le colora sulla pagina, si sceglie per ogni colonna il campo (Modello, Codice, EAN, Descrizione, Prezzo),
- si prova con "Anteprima pagina" e si salva. Il fornitore compare subito nel menu Fornitore.
+ le colora sulla pagina, si sceglie per ogni colonna il campo (Modello, Codice, EAN, Descrizione, Prezzo,
+ Testo per una colonna in piu') e il nome con cui compare nell'Excel, si prova con "Anteprima pagina" e
+ si salva. Il fornitore compare subito nel menu Fornitore.
  Accanto al menu: "Modifica..." riapre nel wizard un fornitore configurato, con la sua mappatura, per
  correggerla; "Rinomina..." ne cambia il nome; "Rimuovi" lo toglie. Il fornitore distribuito col
  programma non si puo' modificare, rinominare ne' rimuovere.

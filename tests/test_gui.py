@@ -313,3 +313,64 @@ def test_tabella_con_le_colonne_dell_estrazione(radice):
     a = t.articolo(iid)
     assert a.altri["testo_1"] == "Blu" and "testo_1" not in a.note_estrazione
     assert a.anomalie == ["Prezzo mancante"]  # anomalie ricalcolate: il profilo prevede il prezzo
+
+
+@pytest.mark.parametrize("variante", ["tre", "colore"])
+def test_colonne_dinamiche_dal_pdf_all_excel(radice, tmp_path, variante):
+    # tutto il percorso: proposta del wizard, profilo, estrazione, tabella, foglio "Listino"
+    from exporters.excel_exporter import esporta_listino
+    from gui.preview_table import PreviewTable
+    from processors.analisi_layout import analizza_pdf
+    from processors.wizard import ModelloWizard
+    from tests.sintetico_generico import ATTESI_COLONNE, crea_listino_colonne
+
+    intestazioni, righe = ATTESI_COLONNE[variante]
+    pdf = crea_listino_colonne(tmp_path / f"{variante}.pdf", variante)
+    m = ModelloWizard(analizza_pdf(str(pdf), 1))
+    m.nome = "ACME"
+    assert m.errori() == []
+    profilo = m.profilo()
+    ris = estrai_listino(pdf, profilo)
+    assert [c.etichetta for c in ris.colonne] == intestazioni
+
+    t = PreviewTable(radice, profilo)
+    t.carica(ris.articoli, ris.colonne)
+    assert [t.tree.heading(c, "text") for c in t.tree["columns"]] == [*intestazioni, "Pag.", "Anomalie"]
+    assert not any(a.tutte_le_anomalie() for a in t.articoli())
+
+    p = tmp_path / f"{variante}.xlsx"
+    assert esporta_listino(t.articoli(), p, t.colonne) == len(righe)
+    ws = load_workbook(p)["Listino"]
+    assert [c.value for c in ws[1]] == intestazioni and ws.max_column == len(intestazioni)
+    assert [list(r) for r in ws.iter_rows(min_row=2, values_only=True)] == righe
+    if variante == "tre":
+        assert not {"Codice", "EAN"} & set(intestazioni)
+    else:
+        assert ws.cell(2, intestazioni.index("Colour") + 1).number_format == "@"
+
+
+def test_dettaglio_con_le_colonne_del_documento(radice, tmp_path, monkeypatch):
+    from gui.main_window import FinestraPrincipale
+    from processors.models import Articolo, ColonnaUscita
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    radice.destroy()
+    app = FinestraPrincipale()
+    app.withdraw()
+    try:
+        colonne = [ColonnaUscita("modello", "Articolo", "modello"), ColonnaUscita("descrizione", "Descrizione", "descrizione"),
+                   ColonnaUscita("prezzo", "Listino", "prezzo")]
+        a = Articolo("VMHM4I", descrizione="Scheda input 4 canali HDMI", prezzo=Decimal("888.00"), pagina=22,
+                     categoria="VISSONIC · MODULI INPUT")
+        app.tabella.carica([a], colonne)
+        app._mostra_dettaglio(a)
+        testo = app.dettaglio.get("1.0", "end")
+        assert "Articolo VMHM4I" in testo and "888,00 €" in testo and "Scheda input 4 canali HDMI" in testo
+        assert "EAN" not in testo and "Codice" not in testo
+    finally:
+        app.destroy()
+    import customtkinter as ctk
+
+    nuova = ctk.CTk()
+    nuova.withdraw()
+    radice.destroy = nuova.destroy

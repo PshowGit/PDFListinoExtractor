@@ -8,7 +8,10 @@ Gennaio 2026 — Prezzi al pubblico»).
 
 ## Cosa produce
 
-Un file `.xlsx` con un solo foglio, **`Listino`**, e cinque colonne:
+Un file `.xlsx` con un solo foglio, **`Listino`**, con le colonne che il listino ha davvero, con i nomi
+scelti nel wizard. Un catalogo con «Articolo | Descrizione | Listino» dà quelle tre colonne, senza Codice
+né EAN vuoti; una colonna in più («Colore», «Note») esce col suo nome. Il profilo JBL incluso, e ogni
+fornitore configurato prima delle colonne dinamiche, dà le cinque colonne di sempre:
 
 | Modello | Codice | EAN | Descrizione | Prezzo |
 |---|---|---|---|---:|
@@ -20,6 +23,7 @@ Un file `.xlsx` con un solo foglio, **`Listino`**, e cinque colonne:
 - **Descrizione**: il testo della colonna Descrizione, con le righe ricomposte. Per gli accessori, dove
   la colonna è vuota e il nome sta tutto nella colonna Modello, si ripete il nome del modello.
 - **Prezzo**: numero vero (non testo), formato `#,##0.00`. Se il prezzo manca resta vuoto, non `0`.
+- Le colonne in più sono celle di testo.
 
 Intestazioni in grassetto, filtri automatici, prima riga bloccata, descrizione con testo a capo.
 Nessuna colonna tecnica: le anomalie si vedono nell'anteprima e si possono salvare in un **report separato**.
@@ -141,8 +145,11 @@ Nella finestra principale: **Configura nuovo fornitore…**
    intestazioni per sinonimi: «SKU», «Part Number», «Cod. art.» valgono come Codice. Se l'intestazione manca,
    ricostruisce le colonne dalla posizione del testo, con i prezzi allineati a destra trattati a parte.
 2. Per ogni colonna il menu propone un campo, dedotto da intestazione e contenuto: Modello, Codice, EAN,
-   Descrizione, Prezzo, *Modello + Codice + EAN impilati* nella stessa colonna (come nel listino JBL), oppure
-   *ignora*. Un clic su una colonna della pagina evidenzia il suo menu.
+   Descrizione, Prezzo, *Modello + Codice + EAN impilati* nella stessa colonna (come nel listino JBL),
+   *Testo* per una colonna in più, oppure *ignora*. Sotto il menu c'è il **nome della colonna** nella tabella
+   e nell'Excel: l'intestazione del PDF se è il nome di quel campo («Articolo», «Listino», «Prezzo al
+   Pubblico»), altrimenti il nome standard; si può cambiare. Un clic su una colonna della pagina evidenzia
+   il suo menu.
 3. **Ancora**: il campo su cui si individua ogni articolo. «Automatica» sceglie il campo identificativo più
    denso, nell'ordine codice, EAN, modello, prezzo. Il prezzo viene per ultimo di proposito: se l'ancora fosse
    il prezzo, un articolo senza prezzo si fonderebbe con quello sopra.
