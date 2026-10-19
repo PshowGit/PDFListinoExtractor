@@ -111,3 +111,91 @@ def test_il_fornitore_salvato_e_subito_utilizzabile(tmp_path, monkeypatch, model
     salva_fornitore_personale(m.chiave(), m.profilo())
     assert config.elenco_fornitori()["acme_audio"] == "ACME Audio"
     assert len(estrai_listino(pdf, config.regole_fornitore("acme_audio")).articoli) == 8
+
+
+def _salvato(m, **opzioni):
+    """Profilo come lo salverebbe il wizard dopo qualche scelta dell'utente."""
+    m.nome = "ACME"
+    m.imposta_campo(2, "ignora")
+    m.ancora, m.formato_prezzo, m.linee_divisorie, m.codice_con_parentesi = "codice", "it", True, False
+    for chiave, valore in opzioni.items():
+        setattr(m, chiave, valore)
+    return m.profilo()
+
+
+def test_modifica_riprende_la_mappatura_salvata(modello):
+    m, pdf = modello
+    salvato = _salvato(m)
+    nuovo = ModelloWizard(analizza_pdf(str(pdf), 1), {"jbl_exhibo": "JBL", "acme": "ACME"})
+    assert nuovo.applica_profilo("acme", salvato) == 4
+    assert nuovo.campi == ["codice", "descrizione", "ignora", "prezzo"]
+    assert (nuovo.nome, nuovo.ancora, nuovo.formato_prezzo) == ("ACME", "codice", "it")
+    assert (nuovo.linee_divisorie, nuovo.codice_con_parentesi, nuovo.codici_tra_parentesi) == (True, False, False)
+    # la chiave resta quella del fornitore modificato anche cambiando il nome, senza chiedere di sostituire
+    nuovo.nome = "ACME Audio 2026"
+    assert nuovo.chiave() == "acme" and not nuovo.sostituisce_esistente()
+    assert nuovo.errori() == []
+    assert nuovo.profilo() == {**salvato, "nome": "ACME Audio 2026"}
+
+
+def test_modifica_senza_intestazione_abbina_per_posizione(tmp_path):
+    pdf = crea_listino_generico(tmp_path / "senza.pdf", con_intestazione=False)
+    m = ModelloWizard(analizza_pdf(str(pdf), 1))
+    m.nome = "Senza"
+    m.imposta_campo(1, "ignora")
+    salvato = m.profilo()
+    assert all(c["intestazioni"] == [] for c in salvato["colonne"])
+    nuovo = ModelloWizard(analizza_pdf(str(pdf), 1))
+    assert nuovo.applica_profilo("senza", salvato) == len(salvato["colonne"])
+    assert nuovo.campi == m.campi
+
+
+def test_modifica_con_colonne_non_abbinate_tiene_la_proposta(modello):
+    m, pdf = modello
+    salvato = _salvato(m)
+    salvato["colonne"] = [salvato["colonne"][0], salvato["colonne"][3]]
+    nuovo = ModelloWizard(analizza_pdf(str(pdf), 1), {"acme": "ACME"})
+    assert nuovo.applica_profilo("acme", salvato) == 2
+    assert nuovo.campi == ["codice", "descrizione", "ean", "prezzo"]  # descrizione ed EAN: proposta
+
+
+def test_modifica_conserva_le_regole_che_il_wizard_non_mostra(modello):
+    m, pdf = modello
+    salvato = _salvato(m, codici_tra_parentesi=False)
+    salvato.update(escludi=["PROMO"], prezzo_massimo=5000, descrizione_vuota_usa_modello=False)
+    salvato["spaziatura"]["fattore_stacco"] = 2.0
+    salvato["regex"]["ean"] = r"^\d{13}$"
+    salvato["colonne"][3]["intestazioni"] = ["Prezzo netto", "Price EUR"]
+    nuovo = ModelloWizard(analizza_pdf(str(pdf), 1), {"acme": "ACME"})
+    nuovo.applica_profilo("acme", salvato)
+    nuovo.linee_divisorie = False
+    p = nuovo.profilo()
+    assert (p["escludi"], p["prezzo_massimo"], p["descrizione_vuota_usa_modello"]) == (["PROMO"], 5000, False)
+    assert p["spaziatura"] == {**salvato["spaziatura"], "linee_divisorie": False}
+    assert p["regex"]["ean"] == r"^\d{13}$"
+    assert p["colonne"][3]["intestazioni"] == ["Prezzo netto", "Price EUR"]  # i sinonimi aggiunti restano
+    valida_schema({"versione_schema": 2, "fornitori": {"acme": p}})
+    assert len(estrai_listino(pdf, p).articoli) == 8
+
+
+def test_modifica_conserva_una_regex_del_codice_personalizzata(modello):
+    m, pdf = modello
+    salvato = _salvato(m)
+    salvato["regex"]["codice"] = r"^\[(?P<valore>[^\]]+)\]$"
+    nuovo = ModelloWizard(analizza_pdf(str(pdf), 1), {"acme": "ACME"})
+    nuovo.applica_profilo("acme", salvato)
+    assert nuovo.codici_tra_parentesi
+    assert nuovo.profilo()["regex"]["codice"] == r"^\[(?P<valore>[^\]]+)\]$"
+    nuovo.codici_tra_parentesi = False
+    assert nuovo.profilo()["regex"]["codice"] is None
+
+
+def test_modifica_non_puo_prendere_il_nome_di_un_altro_fornitore(modello):
+    m, pdf = modello
+    salvato = _salvato(m)
+    nuovo = ModelloWizard(analizza_pdf(str(pdf), 1), {"jbl_exhibo": "JBL (Exhibo)", "acme": "ACME"})
+    nuovo.applica_profilo("acme", salvato)
+    nuovo.nome = "jbl (exhibo)"
+    assert any("Esiste gia'" in e for e in nuovo.errori())
+    nuovo.nome = "acme"
+    assert nuovo.errori() == []

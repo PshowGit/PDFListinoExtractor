@@ -186,6 +186,11 @@ def _personale(dati: dict, chiave: str) -> dict:
     return dati["fornitori"][chiave]
 
 
+def profilo_personale(chiave: str, percorso: Path | None = None) -> dict:
+    """Il profilo di un fornitore personale cosi' com'e' salvato (in versione 2), da modificare nel wizard."""
+    return _personale(_da_modificare(percorso or percorso_regole_personali()), chiave)
+
+
 def rinomina_fornitore_personale(chiave: str, nome: str, percorso: Path | None = None) -> Path:
     """Cambia il nome con cui un fornitore personale compare nel menu; chiave e regole restano.
 

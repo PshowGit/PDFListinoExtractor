@@ -30,7 +30,7 @@ class FinestraPrincipale(ctk.CTk):
         if icona().is_file():
             self.iconbitmap(str(icona()))
         self.geometry("1280x820")
-        self.minsize(980, 640)
+        self.minsize(1040, 640)  # la riga del fornitore: menu, tre pulsanti e il wizard
 
         self.fornitori = elenco_fornitori()
         self.personali = config.chiavi_personali()  # i soli che si possono rinominare o rimuovere
@@ -71,10 +71,14 @@ class FinestraPrincipale(ctk.CTk):
             scelta, values=list(self.fornitori.values()), command=self._cambia_fornitore, width=280
         )
         self.menu_fornitore.pack(side="left")
-        self.btn_rinomina = ctk.CTkButton(
-            scelta, text="Rinomina…", command=self._rinomina_fornitore, width=90, fg_color="gray"
+        self.btn_modifica = ctk.CTkButton(
+            scelta, text="Modifica…", command=self._modifica_fornitore, width=80, fg_color="gray"
         )
-        self.btn_rinomina.pack(side="left", padx=(8, 0))
+        self.btn_modifica.pack(side="left", padx=(8, 0))
+        self.btn_rinomina = ctk.CTkButton(
+            scelta, text="Rinomina…", command=self._rinomina_fornitore, width=85, fg_color="gray"
+        )
+        self.btn_rinomina.pack(side="left", padx=(6, 0))
         self.btn_rimuovi = ctk.CTkButton(
             scelta, text="Rimuovi", command=self._rimuovi_fornitore, width=80,
             fg_color="#B04A4A", hover_color="#8E3B3B",
@@ -108,6 +112,16 @@ class FinestraPrincipale(ctk.CTk):
         self._imposta_fornitore(seleziona if seleziona in self.fornitori else next(iter(self.fornitori)))
         if self._wizard is not None and self._wizard.winfo_exists():
             self._wizard.aggiorna_fornitori(self.fornitori)
+
+    def _modifica_fornitore(self):
+        chiave = self.chiave_fornitore
+        try:
+            profilo = config.profilo_personale(chiave)
+        except (OSError, ValueError, KeyError) as e:
+            log.exception("Lettura del fornitore da modificare non riuscita")
+            messagebox.showerror("Modifica fornitore", str(e), parent=self)
+            return
+        self._apri_wizard(modifica=(chiave, profilo))
 
     def _rinomina_fornitore(self):
         chiave = self.chiave_fornitore
@@ -406,6 +420,7 @@ class FinestraPrincipale(ctk.CTk):
         personale = self.chiave_fornitore in self.personali
         self.btn_seleziona.configure(state=stato(not occupato))
         self.menu_fornitore.configure(state=stato(not occupato))
+        self.btn_modifica.configure(state=stato(personale and not occupato))
         self.btn_rinomina.configure(state=stato(personale and not occupato))
         self.btn_rimuovi.configure(state=stato(personale and not occupato))
         self.btn_wizard.configure(state=stato(not occupato))
@@ -426,14 +441,22 @@ class FinestraPrincipale(ctk.CTk):
 
     # --- wizard -------------------------------------------------------------------------------
 
-    def _apri_wizard(self):
+    def _apri_wizard(self, modifica: tuple[str, dict] | None = None):
+        """Wizard per un fornitore nuovo, o con `modifica` = (chiave, profilo) per correggerne uno salvato."""
         from gui.wizard_fornitore import WizardFornitore
 
         if self._wizard is not None and self._wizard.winfo_exists():
             self._wizard.lift()
+            if modifica is not None:
+                messagebox.showinfo(
+                    "Modifica fornitore", "Il wizard e' gia' aperto: chiudilo prima di modificare un fornitore.",
+                    parent=self._wizard,
+                )
             return
         iniziale = self.info_pdf.percorso if self.info_pdf else None
-        self._wizard = WizardFornitore(self, self.fornitori, al_salvataggio=self._fornitore_salvato, pdf=iniziale)
+        self._wizard = WizardFornitore(
+            self, self.fornitori, al_salvataggio=self._fornitore_salvato, pdf=iniziale, modifica=modifica
+        )
 
     def _fornitore_salvato(self, chiave: str):
         """Il wizard ha salvato un fornitore: lo si rende disponibile e lo si seleziona."""

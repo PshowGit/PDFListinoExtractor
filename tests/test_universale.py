@@ -114,3 +114,22 @@ def test_wizard_sul_listino_reale_coincide_col_profilo_distribuito(regole):
     chiave = [(x.modello, x.codice, x.ean, x.descrizione, x.prezzo, x.categoria) for x in distribuito.articoli]
     assert len(chiave) == 673
     assert [(x.modello, x.codice, x.ean, x.descrizione, x.prezzo, x.categoria) for x in dal_wizard.articoli] == chiave
+
+
+@pytest.mark.skipif(not CAMPIONE_REALE.is_file(), reason="listino campione non presente in samples/")
+def test_modificare_il_profilo_jbl_nel_wizard_non_cambia_l_estrazione(regole):
+    import json
+
+    from config import PERCORSO_REGOLE
+    from processors.wizard import ModelloWizard
+
+    salvato = json.loads(PERCORSO_REGOLE.read_text(encoding="utf-8-sig"))["fornitori"]["jbl_exhibo"]
+    m = ModelloWizard(analizza_pdf(str(CAMPIONE_REALE), 1))
+    assert m.applica_profilo("jbl_exhibo", salvato) == len(salvato["colonne"])
+    assert m.campi == [c["campo"] for c in salvato["colonne"]]
+    rimodificato = m.profilo()  # aperto e salvato senza toccare nulla
+    assert rimodificato["colonne"][2]["intestazioni"] == ["Prezzo al", "Prezzo al Pubblico"]
+    campi = ("modello", "codice", "ean", "descrizione", "prezzo", "categoria")
+    prima = [tuple(getattr(x, c) for c in campi) for x in estrai_listino(CAMPIONE_REALE, regole).articoli]
+    dopo = [tuple(getattr(x, c) for c in campi) for x in estrai_listino(CAMPIONE_REALE, rimodificato).articoli]
+    assert len(prima) == 673 and dopo == prima

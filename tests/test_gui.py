@@ -213,8 +213,10 @@ def test_rinominare_e_rimuovere_un_fornitore_dalla_finestra_principale(radice, t
         # il fornitore distribuito col programma e' in sola lettura
         assert app.chiave_fornitore == "jbl_exhibo"
         assert app.btn_rinomina.cget("state") == "disabled" and app.btn_rimuovi.cget("state") == "disabled"
+        assert app.btn_modifica.cget("state") == "disabled"
         app._cambia_fornitore("ACME")
         assert app.btn_rinomina.cget("state") == "normal" and app.btn_rimuovi.cget("state") == "normal"
+        assert app.btn_modifica.cget("state") == "normal"
 
         monkeypatch.setattr(finestra, "chiedi_testo", lambda *a, **k: "ACME Audio 2026")
         app._rinomina_fornitore()
@@ -243,3 +245,41 @@ def test_rinominare_e_rimuovere_un_fornitore_dalla_finestra_principale(radice, t
     nuova = ctk.CTk()
     nuova.withdraw()
     radice.destroy = nuova.destroy
+
+
+def test_wizard_in_modifica_riprende_e_aggiorna_il_fornitore(radice, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    import config
+    from gui.wizard_fornitore import WizardFornitore
+    from processors.analisi_layout import analizza_pdf
+    from processors.wizard import ModelloWizard
+    from tests.sintetico_generico import crea_listino_generico
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: None)
+    pdf = crea_listino_generico(tmp_path / "acme.pdf")
+    m = ModelloWizard(analizza_pdf(str(pdf), 1))
+    m.nome, m.formato_prezzo = "ACME", "it"
+    m.imposta_campo(2, "ignora")
+    config.salva_fornitore_personale("acme", {**m.profilo(), "escludi": ["PROMO"]})
+
+    salvati = []
+    w = WizardFornitore(radice, config.elenco_fornitori(), al_salvataggio=salvati.append, pdf=pdf,
+                        modifica=("acme", config.profilo_personale("acme")))
+    w.withdraw()
+    _attendi(radice, lambda: w.modello is not None)
+    assert "Modifica fornitore" in w.title() and w.btn_salva.cget("text") == "Salva modifiche"
+    assert [x.get() for x in w._menu_colonne] == ["Codice", "Descrizione", "— ignora —", "Prezzo"]
+    assert w.ent_nome.get() == "ACME" and w.menu_formato.get() == "Italiano (1.234,56)"
+    assert "4 colonne su 4 riprese" in w.lbl_stato.cget("text")
+
+    w.imposta_campo(2, "ean")
+    w.ent_nome.delete(0, "end")
+    w.ent_nome.insert(0, "ACME Audio")
+    assert w._salva()
+    assert salvati == ["acme"]
+    salvato = config.profilo_personale("acme")
+    assert salvato["nome"] == "ACME Audio" and salvato["colonne"][2]["campo"] == "ean"
+    assert salvato["escludi"] == ["PROMO"]  # cio' che il wizard non mostra resta
+    assert set(config.chiavi_personali()) == {"acme"}

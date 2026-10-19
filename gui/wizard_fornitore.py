@@ -4,6 +4,8 @@ Flusso: apri il PDF e scegli la pagina -> la pre-analisi (nel processo separato)
 intestazione e le evidenzia sulla pagina -> per ogni colonna si sceglie il campo da un menu ->
 ancora, formato prezzi e opzioni -> «Anteprima» estrae la sola pagina scelta (sempre nel processo
 separato) -> «Salva fornitore» scrive il profilo nelle regole personali.
+Con `modifica` la stessa finestra corregge un fornitore gia' salvato: a ogni analisi la sua mappatura
+viene riportata sulle colonne trovate (ModelloWizard.applica_profilo) e si salva con la stessa chiave.
 La logica sta in processors/wizard.py (ModelloWizard): qui c'e' solo il collegamento con i widget.
 """
 import io
@@ -50,9 +52,13 @@ class WizardFornitore(ctk.CTkToplevel):
         al_salvataggio: Callable[[str], None] | None = None,
         pdf: Path | None = None,
         percorso_regole: Path | None = None,
+        modifica: tuple[str, dict] | None = None,
     ):
         super().__init__(master)
-        self.title("Configura nuovo fornitore")
+        # modifica: (chiave, profilo salvato) del fornitore da correggere; None per uno nuovo
+        self.modifica = modifica
+        self.title(f"Modifica fornitore «{modifica[1].get('nome', modifica[0])}»" if modifica
+                   else "Configura nuovo fornitore")
         self.geometry("1440x920")
         self.minsize(1100, 720)
         if icona().is_file():
@@ -79,7 +85,10 @@ class WizardFornitore(ctk.CTkToplevel):
         self._area_pagina()
         self._pannello_mappatura()
         self._area_anteprima()
-        self.lbl_stato = ctk.CTkLabel(self, text="Apri un listino PDF per cominciare.", anchor="w")
+        self.lbl_stato = ctk.CTkLabel(self, anchor="w", text=(
+            "Apri un listino PDF di questo fornitore: la mappatura salvata verra' riportata sulle colonne trovate."
+            if modifica else "Apri un listino PDF per cominciare."
+        ))
         self.lbl_stato.grid(row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
         self.protocol("WM_DELETE_WINDOW", self.chiudi)
         self._aggiorna_comandi()
@@ -169,8 +178,8 @@ class WizardFornitore(ctk.CTkToplevel):
         b.grid(row=4, column=0, sticky="ew", padx=8, pady=(4, 10))
         self.btn_anteprima = ctk.CTkButton(b, text="Anteprima pagina", command=self._anteprima)
         self.btn_anteprima.pack(side="left", expand=True, fill="x", padx=(0, 4))
-        self.btn_salva = ctk.CTkButton(b, text="Salva fornitore", command=self._salva, fg_color="#2E7D32",
-                                       hover_color="#1B5E20")
+        self.btn_salva = ctk.CTkButton(b, text="Salva modifiche" if self.modifica else "Salva fornitore",
+                                       command=self._salva, fg_color="#2E7D32", hover_color="#1B5E20")
         self.btn_salva.pack(side="left", expand=True, fill="x", padx=(4, 0))
 
     def _area_anteprima(self):
@@ -231,7 +240,9 @@ class WizardFornitore(ctk.CTkToplevel):
         analisi, png = risultato
         nome = self.modello.nome if self.modello else ""
         self.modello = ModelloWizard(analisi, self.fornitori)
-        self.modello.nome = nome or self.ent_nome.get()
+        ritrovate = self.modello.applica_profilo(*self.modifica) if self.modifica else None
+        if nome or not self.modifica:  # alla prima analisi di una modifica vale il nome salvato
+            self.modello.nome = nome or self.ent_nome.get()
         self.pagine_totali = analisi.pagine_totali
         self.lbl_totale.configure(text=f"di {analisi.pagine_totali}")
         self._base = Image.open(io.BytesIO(png)).convert("RGB")
@@ -243,10 +254,17 @@ class WizardFornitore(ctk.CTkToplevel):
         self._mostra_opzioni()
         self._ridisegna()
         avvisi = " ".join(analisi.avvisi)
-        self._stato(
-            f"Pagina {analisi.pagina}: {len(analisi.colonne)} colonne, ancora proposta «"
-            f"{ETICHETTE_ANCORA.get(analisi.ancora_proposta, analisi.ancora_proposta)}». {avvisi}"
-        )
+        if ritrovate is None:
+            self._stato(
+                f"Pagina {analisi.pagina}: {len(analisi.colonne)} colonne, ancora proposta «"
+                f"{ETICHETTE_ANCORA.get(analisi.ancora_proposta, analisi.ancora_proposta)}». {avvisi}"
+            )
+        else:
+            altre = len(analisi.colonne) - ritrovate
+            self._stato(
+                f"Pagina {analisi.pagina}: {ritrovate} colonne su {len(analisi.colonne)} riprese dal fornitore salvato"
+                + (f"; {altre} con la proposta dell'analisi, da controllare." if altre else ".") + f" {avvisi}"
+            )
         self._aggiorna_comandi()
 
     def _lavoro_fallito(self, messaggio: str):
@@ -435,9 +453,10 @@ class WizardFornitore(ctk.CTkToplevel):
         self.ultimo_salvataggio = percorso
         if self.al_salvataggio:
             self.al_salvataggio(chiave)
+        esito = "e' stato aggiornato" if self.modifica else "e' ora disponibile nel menu Fornitore"
         messagebox.showinfo(
             "Fornitore salvato",
-            f"«{self.modello.nome.strip()}» e' ora disponibile nel menu Fornitore.\n\nRegole salvate in:\n{percorso}",
+            f"«{self.modello.nome.strip()}» {esito}.\n\nRegole salvate in:\n{percorso}",
             parent=self,
         )
         self.chiudi()

@@ -155,10 +155,17 @@ Il fornitore finisce in `%LOCALAPPDATA%\PDFListinoExtractor\supplier_rules.json`
 (si apre col Blocco note), viene scritto in modo atomico e validato con `config/supplier_rules.schema.json`;
 la versione precedente resta in una copia `.bak`. Gli aggiornamenti del programma non lo toccano.
 
-Accanto al menu «Fornitore», **Rinomina…** cambia il nome con cui compare il fornitore (le regole restano le
-stesse) e **Rimuovi** lo toglie dal file personale. Valgono solo per i fornitori configurati col wizard: il
-profilo distribuito col programma è in sola lettura e per lui i due pulsanti restano disattivati. Due
-fornitori non possono avere lo stesso nome.
+Accanto al menu «Fornitore»:
+
+- **Modifica…** riapre il fornitore nel wizard: si apre un suo listino e la mappatura salvata viene riportata
+  sulle colonne trovate (prima per intestazione, poi per posizione). Le colonne che non si ritrovano tengono la
+  proposta dell'analisi e la riga di stato lo dice. «Salva modifiche» aggiorna lo stesso fornitore, anche se
+  se ne cambia il nome, e conserva le regole che il wizard non mostra (esclusioni, prezzo massimo, regex).
+- **Rinomina…** cambia il nome con cui compare il fornitore; le regole restano le stesse.
+- **Rimuovi** lo toglie dal file personale.
+
+Valgono solo per i fornitori configurati col wizard: il profilo distribuito col programma è in sola lettura e
+per lui i tre pulsanti restano disattivati. Due fornitori non possono avere lo stesso nome.
 
 ## Come funziona il motore
 
