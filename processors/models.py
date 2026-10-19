@@ -35,6 +35,16 @@ class ColonnaUscita:
 COLONNE_STANDARD = tuple(ColonnaUscita(c, INTESTAZIONI[c], c) for c in CAMPI)
 
 
+@dataclass
+class GeometriaPagina:
+    """Che cosa il motore ha visto su una pagina, per mostrarlo nel wizard: righe d'intestazione (y0, y1),
+    titoli di sezione e bollini scartati (x0, y0, x1, y1, testo). Gli articoli hanno gia' il loro `bbox`."""
+
+    intestazioni: list[tuple[float, float]] = field(default_factory=list)
+    titoli: list[tuple[float, float, float, float, str]] = field(default_factory=list)
+    bollini: list[tuple[float, float, float, float, str]] = field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class Span:
     """Un frammento di testo con la sua posizione nella pagina (coordinate PDF, punti)."""

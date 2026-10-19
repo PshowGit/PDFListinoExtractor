@@ -16,7 +16,7 @@ from extractors.table_extractor import linee_divisorie
 from extractors.text_extractor import estrai_span
 from processors.article_parser import ParserListino
 from processors.data_validator import valida
-from processors.models import COLONNE_STANDARD, Articolo, ColonnaUscita, Span
+from processors.models import COLONNE_STANDARD, Articolo, ColonnaUscita, GeometriaPagina, Span
 from processors.profilo import colonne_uscita, normalizza
 
 log = logging.getLogger(__name__)
@@ -41,6 +41,8 @@ class RisultatoEstrazione:
     ancora: str = ""  # campo su cui sono stati individuati gli articoli
     # colonne della tabella e del foglio "Listino", dal profilo: solo quelle che il documento ha
     colonne: list[ColonnaUscita] = field(default_factory=lambda: list(COLONNE_STANDARD))
+    # solo per l'anteprima (pagine scelte): intestazioni, titoli e bollini visti, da disegnare nel wizard
+    geometria: dict[int, GeometriaPagina] = field(default_factory=dict)
 
 
 @dataclass
@@ -101,6 +103,8 @@ def estrai_listino(
                 ris.avvisi.append(f"Pagina {numero}: errore di lettura ({e})")
 
         parser = ParserListino(regole)
+        if solo_pagine:
+            parser.geometrie = ris.geometria
         parser.prepara([(p.spans, p.larghezza, p.altezza) for p in pagine])
         ris.ancora = parser.ancora
         da_leggere = [p for p in pagine if not solo_pagine or p.numero in solo_pagine]

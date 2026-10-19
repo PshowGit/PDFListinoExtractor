@@ -243,6 +243,39 @@ def test_wizard_dalla_pdf_al_fornitore_salvato(radice, tmp_path, monkeypatch):
     assert config.elenco_fornitori()["acme_audio"] == "ACME Audio"
 
 
+def test_wizard_disegna_l_anteprima_sulla_pagina(radice, tmp_path):
+    from gui.wizard_fornitore import WizardFornitore
+    from tests.sintetico_catalogo import crea_catalogo
+
+    pdf = crea_catalogo(tmp_path / "catalogo.pdf")
+    w = WizardFornitore(radice, {}, pdf=pdf)
+    w.withdraw()
+    try:
+        _attendi(radice, lambda: w.modello is not None)
+        assert w.modello.analisi.intestazioni and len(w.modello.analisi.intestazioni) == 2  # due tabelle
+        w._vai(2)  # la pagina col titolo «CAVI» e il bollino «NEW»
+        _attendi(radice, lambda: w._lavoro is None and w.modello.analisi.pagina == 2)
+        w._anteprima()
+        _attendi(radice, lambda: w._lavoro is None)
+        articoli = w.tabella.articoli()
+        # un riquadro per articolo, coi titoli e i bollini visti dal motore
+        assert [a for a, _ in w.riquadri_articoli] == articoli and len(articoli) == 3
+        assert [t[4] for t in w._geometria.titoli] == ["CAVI"] and [b[4] for b in w._geometria.bollini] == ["NEW"]
+        assert "1 titoli, 1 bollini" in w.lbl_anteprima.cget("text")
+        # dalla tabella alla pagina e dalla pagina alla tabella
+        terzo = articoli[2]
+        w._riga_anteprima(terzo)
+        assert w._evidenziato is terzo
+        x0, y0, x1, y1 = terzo.bbox
+        assert w.articolo_nel_punto((x0 + x1) / 2, (y0 + y1) / 2) is terzo
+        assert w.articolo_nel_punto(5, 5) is None
+        # cambiare la mappatura toglie i riquadri: venivano dalla mappatura di prima
+        w.imposta_campo(2, "ignora")
+        assert w.riquadri_articoli == [] and "da rifare" in w.lbl_anteprima.cget("text")
+    finally:
+        w.chiudi()
+
+
 def test_wizard_con_pdf_non_valido_mostra_l_errore(radice, tmp_path, monkeypatch):
     from tkinter import messagebox
 

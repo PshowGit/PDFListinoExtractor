@@ -28,7 +28,7 @@ from extractors.table_extractor import (
 )
 from processors import raggruppamento
 from processors.data_validator import ean_valido
-from processors.models import CAMPI, MARCA, TESTO_GENERICO, Articolo, Span
+from processors.models import CAMPI, MARCA, TESTO_GENERICO, Articolo, GeometriaPagina, Span
 from processors.price_parser import RisultatoPrezzo, parse_prezzo
 from processors.profilo import CAMPI_ANCORA, CONTIENE_PREDEFINITO, chiavi_testo, normalizza, normalizza_testo
 
@@ -198,6 +198,8 @@ class ParserListino:
         self.categoria = ""
         self.ultimo: Articolo | None = None
         self.avvisi: list[str] = []
+        # per il wizard: che cosa si e' visto su ogni pagina (None = non registrare, l'estrazione intera)
+        self.geometrie: dict[int, GeometriaPagina] | None = None
 
     # --- preparazione sul documento ---------------------------------------------------------
 
@@ -353,6 +355,7 @@ class ParserListino:
         tol = self.metr.tolleranza_riga
         n_ancora = self._colonna_del_campo(t, self.ancora)
         intest = getattr(t, "intestazioni", [])
+        titoli_trovati = list(t.titoli)
         if separatori and n_ancora is not None:
             t.titoli = [r for r in t.titoli if not self._e_bollino(r, t.righe.get(n_ancora, []), separatori)]
         # anche fuori dalla griglia: una parola stretta accanto ai dati di un articolo e' un bollino («NEW»)
@@ -361,6 +364,14 @@ class ParserListino:
             ancore = [r for r in t.righe.get(n_ancora, []) if self._e_ancora(r, self.ancora, t.colonne[n_ancora])]
             t.titoli = [r for r in t.titoli if not raggruppamento.a_fianco_dei_dati(
                 r, dati, ancore, [i.y0 for i in intest], self.metr.corpo, self.passo_ancora, tol)]
+        if self.geometrie is not None:
+            def riquadro(r):
+                return (r.x0, r.y0, r.x1, r.y1, _pulito(r.testo))
+
+            rimasti = {id(r) for r in t.titoli}
+            self.geometrie[pagina] = GeometriaPagina(
+                [(i.y0, i.y1) for i in intest], [riquadro(r) for r in t.titoli],
+                [riquadro(r) for r in titoli_trovati if id(r) not in rimasti])
         # una linea divisoria e' il bordo superiore di una cella, e il riquadro del testo dentro la cella
         # la sfiora da sopra (Etabeta: linea a 59,7, testo da 59,5): taglia quindi una tolleranza piu' in alto,
         # o la prima riga di ogni cella finisce nella cella precedente

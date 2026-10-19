@@ -34,6 +34,9 @@ from processors.wizard import (
 
 log = logging.getLogger(__name__)
 ZOOM = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
+# riquadri dell'anteprima sulla pagina: articoli a colori alterni, titoli di sezione, bollini scartati
+COLORI_ARTICOLO = ("#C2185B", "#00796B")
+COLORE_TITOLO, COLORE_BOLLINO = "#E53935", "#757575"
 
 
 def _chiave_per_etichetta(tabella: dict[str, str], etichetta: str) -> str:
@@ -79,6 +82,11 @@ class WizardFornitore(ctk.CTkToplevel):
         self._nomi_colonne: list[ctk.CTkEntry] = []  # nome della colonna nella tabella e nell'Excel
         self._selezionata: int | None = None
         self.ultimo_salvataggio: Path | None = None
+        # l'ultima anteprima, disegnata sulla pagina: articoli, e intestazioni, titoli e bollini visti dal motore
+        self._anteprima_articoli: list = []
+        self._geometria = None
+        self._evidenziato = None  # l'articolo scelto nella tabella o sulla pagina
+        self.riquadri_articoli: list[tuple[object, tuple[float, float, float, float]]] = []
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -192,7 +200,8 @@ class WizardFornitore(ctk.CTkToplevel):
         self.lbl_anteprima = ctk.CTkLabel(f, text="Anteprima: non ancora eseguita", anchor="w",
                                           font=ctk.CTkFont(weight="bold"))
         self.lbl_anteprima.grid(row=0, column=0, sticky="ew", padx=8, pady=(6, 2))
-        self.tabella = PreviewTable(f, normalizza({"nome": "_", "colonne": [{"campo": "modello"}]}))
+        self.tabella = PreviewTable(f, normalizza({"nome": "_", "colonne": [{"campo": "modello"}]}),
+                                    on_select=self._riga_anteprima)
         self.tabella.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
 
     # --- PDF e pagina -------------------------------------------------------------------------
@@ -246,6 +255,7 @@ class WizardFornitore(ctk.CTkToplevel):
             self.modello.nome = nome or self.ent_nome.get()
         self.pagine_totali = analisi.pagine_totali
         self.lbl_totale.configure(text=f"di {analisi.pagine_totali}")
+        self._scarta_disegno_anteprima()  # pagina nuova: i riquadri dell'anteprima di prima non valgono
         self._base = Image.open(io.BytesIO(png)).convert("RGB")
         if self._foto is None:  # primo PDF: zoom che fa stare la pagina nel riquadro
             larghezza = max(400, self.canvas.winfo_width())
@@ -338,6 +348,9 @@ class WizardFornitore(ctk.CTkToplevel):
         self.modello.imposta_campo(indice, campo)
         self._mostra_nome(indice)  # il nome proposto segue il ruolo
         campione.configure(fg_color=COLORI_CAMPO[campo])
+        if self._anteprima_articoli:  # gli articoli disegnati vengono dalla mappatura di prima
+            self._scarta_disegno_anteprima()
+            self.lbl_anteprima.configure(text="Anteprima da rifare: la mappatura e' cambiata")
         self._ridisegna()
         self._mostra_errori()
 
@@ -390,20 +403,79 @@ class WizardFornitore(ctk.CTkToplevel):
                         outline=_rgba(colore, 255), width=3 if i == self._selezionata else 1)
             d.rectangle((x0, alto * scala, x0 + 22, alto * scala + 16), fill=_rgba(colore, 255))
             d.text((x0 + 6, alto * scala + 2), str(i + 1), fill="white")
-        if a.intestazione:
-            d.rectangle((2, a.intestazione[0] * scala - 2, img.width - 3, a.intestazione[1] * scala + 2),
-                        outline=(40, 40, 40, 200), width=2)
+        # tutte le intestazioni della pagina, una per tabella (dall'anteprima, se c'e': sono quelle del profilo)
+        intestazioni = self._geometria.intestazioni if self._geometria else (
+            a.intestazioni or ([a.intestazione] if a.intestazione else []))
+        for y0, y1 in intestazioni:
+            d.rectangle((2, y0 * scala - 2, img.width - 3, y1 * scala + 2), outline=(40, 40, 40, 220), width=2)
+        self._disegna_anteprima(d, scala)
         img = Image.alpha_composite(img.convert("RGBA"), livello).convert("RGB")
         self._foto = ImageTk.PhotoImage(img)
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, image=self._foto, anchor="nw")
         self.canvas.configure(scrollregion=(0, 0, img.width, img.height))
 
+    def _disegna_anteprima(self, d: ImageDraw.ImageDraw, scala: float) -> None:
+        """Sulla pagina, l'ultima anteprima: titoli di sezione (rossi: diventano la categoria), bollini scartati
+        (grigi) e un riquadro numerato per articolo, con colori alterni perche' si veda dove finisce ognuno."""
+        self.riquadri_articoli = []
+        if self._geometria is not None:
+            for colore, etichetta, elenco in ((COLORE_TITOLO, "titolo", self._geometria.titoli),
+                                              (COLORE_BOLLINO, "bollino", self._geometria.bollini)):
+                for x0, y0, x1, y1, _testo in elenco:
+                    d.rectangle((x0 * scala - 2, y0 * scala - 2, x1 * scala + 2, y1 * scala + 2),
+                                outline=_rgba(colore, 255), width=2)
+                    d.text((x1 * scala + 4, y0 * scala), etichetta, fill=_rgba(colore, 255))
+        for k, art in enumerate(self._anteprima_articoli):
+            x0, y0, x1, y1 = art.bbox
+            if x1 <= x0:
+                continue
+            self.riquadri_articoli.append((art, art.bbox))
+            colore = COLORI_ARTICOLO[k % 2]
+            scelto = art is self._evidenziato
+            riquadro = (x0 * scala - 3, y0 * scala - 2, x1 * scala + 3, y1 * scala + 2)
+            d.rectangle(riquadro, fill=_rgba("#FFD54F", 90) if scelto else None,
+                        outline=_rgba(colore, 255), width=4 if scelto else 2)
+            numero = str(k + 1)
+            d.rectangle((riquadro[0] - 8 - 7 * len(numero), riquadro[1], riquadro[0], riquadro[1] + 14),
+                        fill=_rgba(colore, 255))
+            d.text((riquadro[0] - 4 - 7 * len(numero), riquadro[1] + 1), numero, fill="white")
+
+    def _scarta_disegno_anteprima(self) -> None:
+        self._anteprima_articoli, self._geometria, self._evidenziato = [], None, None
+        self.riquadri_articoli = []
+
+    def _riga_anteprima(self, articolo) -> None:
+        """Riga scelta nella tabella dell'anteprima: il suo articolo si evidenzia sulla pagina, che scorre fin li'."""
+        if articolo is None or not any(articolo is a for a in self._anteprima_articoli):
+            return
+        self.evidenzia_articolo(articolo)
+
+    def evidenzia_articolo(self, articolo) -> None:
+        self._evidenziato = articolo
+        self._ridisegna()
+        if self._base is not None and self.modello is not None:
+            altezza = self.modello.analisi.altezza * self.zoom
+            self.canvas.yview_moveto(max(0.0, (articolo.bbox[1] * self.zoom - 60) / altezza))
+
+    def articolo_nel_punto(self, x: float, y: float):
+        """L'articolo dell'anteprima che contiene il punto (in punti della pagina), o None."""
+        return next((art for art, (x0, y0, x1, y1) in self.riquadri_articoli if x0 <= x <= x1 and y0 <= y <= y1), None)
+
     def _clic_pagina(self, evento):
-        """Clic su una colonna della pagina: ne evidenzia il riquadro e il menu."""
+        """Clic sulla pagina: su un articolo dell'anteprima ne sceglie la riga nella tabella; altrove evidenzia la
+        colonna e il suo menu."""
         if self.modello is None:
             return
         x = self.canvas.canvasx(evento.x) / self.zoom
+        y = self.canvas.canvasy(evento.y) / self.zoom
+        articolo = self.articolo_nel_punto(x, y)
+        if articolo is not None:
+            iid = self.tabella.iid_di(articolo)
+            if iid is not None:
+                self.tabella.seleziona(iid)
+            self.evidenzia_articolo(articolo)
+            return
         for i, col in enumerate(self.modello.analisi.colonne):
             if col.x0 <= x <= col.x1:
                 self.seleziona_colonna(i)
@@ -438,12 +510,20 @@ class WizardFornitore(ctk.CTkToplevel):
         self._lavoro = None
         self.tabella.regole = normalizza(profilo)
         self.tabella.carica(ris.articoli, ris.colonne)
+        self._anteprima_articoli = list(ris.articoli)
+        self._geometria = ris.geometria.get(self.pagina)
+        self._evidenziato = None
+        self._ridisegna()
         n, anomali = self.tabella.conteggi()
+        geometria = self._geometria
+        visti = f" · {len(geometria.titoli)} titoli, {len(geometria.bollini)} bollini" if geometria else ""
         self.lbl_anteprima.configure(
             text=f"Anteprima pagina {self.pagina}: {n} articoli · {anomali} da verificare · "
-                 f"ancora «{ETICHETTE_ANCORA.get(ris.ancora, ris.ancora)}»"
+                 f"ancora «{ETICHETTE_ANCORA.get(ris.ancora, ris.ancora)}»{visti}"
         )
-        self._stato("Controlla la tabella: se le righe sono giuste, salva il fornitore.")
+        self._stato("Sulla pagina: un riquadro numerato per articolo; in rosso i titoli (diventano la categoria), in "
+                    "grigio i bollini ignorati. Clic su una riga o su un articolo per ritrovarlo. Se le righe sono "
+                    "giuste, salva il fornitore.")
         self._aggiorna_comandi()
 
     def _salva(self) -> bool:

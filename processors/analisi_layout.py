@@ -77,7 +77,7 @@ class AnalisiLayout:
     larghezza: float
     altezza: float
     colonne: list[ColonnaRilevata]
-    intestazione: tuple[float, float] | None
+    intestazione: tuple[float, float] | None  # la prima, da cui si leggono le colonne
     ancora_proposta: str
     corpo: float
     interlinea: float
@@ -88,6 +88,8 @@ class AnalisiLayout:
     pagine_campione: list[DensitaPagina] = field(default_factory=list)
     # una pagina con una tabella, quando quella analizzata sembra un indice o una copertina (v. pagina_consigliata)
     pagina_consigliata: int | None = None
+    # tutte le righe d'intestazione della pagina (y0, y1): un catalogo ne ha una per tabella
+    intestazioni: list[tuple[float, float]] = field(default_factory=list)
 
 
 def _profilo_generico() -> dict:
@@ -197,9 +199,10 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
             and not any(i.y0 - tol <= r.y0 <= i.y1 for i in intestazioni[1:])
             for s in r.spans if s.size < 1.3 * metr.corpo
         ]
-        return corpo, prima
+        return corpo, prima, intestazioni
 
-    letture = {n: corpo_e_intestazione(s, h) for n, (s, _, h) in pagine.items()}
+    tutte = {n: corpo_e_intestazione(s, h) for n, (s, _, h) in pagine.items()}
+    letture = {n: (corpo, prima) for n, (corpo, prima, _) in tutte.items()}
     corpi = {n: corpo for n, (corpo, _) in letture.items()}
     intest = letture[pagina][1]
     avvisi = []
@@ -308,6 +311,7 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
     analisi.pagine_campione = [DensitaPagina(n, sum(1 for s in corpo if _sembra_prezzo(s.testo)), prima is not None)
                                for n, (corpo, prima) in sorted(letture.items())]
     analisi.pagina_consigliata = pagina_consigliata(analisi.pagine_campione, pagina)
+    analisi.intestazioni = [(i.y0, i.y1) for i in tutte[pagina][2]]
     return analisi
 
 

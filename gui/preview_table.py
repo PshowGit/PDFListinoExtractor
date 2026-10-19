@@ -156,6 +156,10 @@ class PreviewTable(ctk.CTkFrame):
     def articolo(self, iid: str) -> Articolo:
         return self._articoli[iid]
 
+    def iid_di(self, articolo: Articolo) -> str | None:
+        """La riga di un articolo (lo stesso oggetto, non uno uguale: due duplicati sono righe diverse)."""
+        return next((iid for iid, a in self._articoli.items() if a is articolo), None)
+
     def selezionato(self) -> Articolo | None:
         sel = self.tree.selection()
         return self._articoli[sel[0]] if sel else None
