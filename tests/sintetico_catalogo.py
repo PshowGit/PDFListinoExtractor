@@ -8,8 +8,9 @@ senza intestazione; una sezione con modelli scritti come nomi («IsoLater»); un
 quotazioni» su due righe (prezzi scritti «EUR 888,00»: il font helv dei PDF di prova non ha il «€»); testo promozionale centrato nella colonna della marca;
 schede prodotto (pagine 140 e 225 del PDF vero): codice, titolo e prezzo sulla prima riga, una linea sotto e
 le caratteristiche nella sola colonna della descrizione, nella cella successiva; un bollino «NEW» in corpo
-12 sotto il codice, nella sua cella, che non e' un titolo di sezione (pagina 13); una parola della
-descrizione spezzata a capo col trattino.
+12 sotto il codice, nella sua cella, che non e' un titolo di sezione (pagina 13); un altro a sinistra del
+codice, accanto alla descrizione, anche senza griglia (pagina 16), e un titolo di sezione altrettanto breve
+su una fascia sua; una parola della descrizione spezzata a capo col trattino.
 """
 from dataclasses import dataclass
 from decimal import Decimal
@@ -19,6 +20,7 @@ import pymupdf
 
 CORPO, PASSO = 9, 10.8
 X_MARCA, X_ART, X_DESC, X_PREZZO_DX = 70, 167, 238, 566.7
+X_BOLLINO = 82
 
 
 @dataclass(frozen=True)
@@ -55,8 +57,12 @@ PAGINE = [
         (["Iso Switcher"], ["Commuta-", "tore stereo A/B 2+2 XLR/In - 2 XLR/Out"], ["EUR 175,00"]),
         ("spazio", 30),
         ("tabella", "MOGAMI", "CAVI CAT5E"),
+        # un titolo di sezione breve su una fascia sua: e' la categoria degli articoli che seguono
+        ("titolo", "CAVI"),
         (["M-CAT5E-2"], ["Cavo Mogami CAT5E - 2 metri"], ["EUR 16,00"]),
-        (["M-CAT5E-3"], ["Cavo Mogami CAT5E - 3 metri"], ["EUR 19,00"]),
+        # un bollino «NEW» a sinistra del codice, accanto alla descrizione, anche senza griglia (pagina 16 del PDF
+        # vero): non e' la categoria e non taglia l'articolo
+        (["M-CAT5E-3"], ["Cavo Mogami CAT5E - 3 metri", "guaina nera"], ["EUR 19,00"], ("sinistra", "NEW")),
     ],
 ]
 # solo nella variante con griglia: nel PDF vero le schede prodotto hanno sempre le linee, e i tre codici in
@@ -87,8 +93,9 @@ ATTESI = [
     AttesoCatalogo("Super Splitter Duo", "Transformer Isolated 2xInput 2xDirect Out - 2xSplit 1", Decimal("340.00"), 1, _A),
     AttesoCatalogo("Pro DI", "Bilanciatore attivo Active Direct Box", None, 1, _A, ("Chiedere quotazioni",)),
     AttesoCatalogo("Iso Switcher", "Commutatore stereo A/B 2+2 XLR/In - 2 XLR/Out", Decimal("175.00"), 2, _A),
-    AttesoCatalogo("M-CAT5E-2", "Cavo Mogami CAT5E - 2 metri", Decimal("16.00"), 2, _M),
-    AttesoCatalogo("M-CAT5E-3", "Cavo Mogami CAT5E - 3 metri", Decimal("19.00"), 2, _M),
+    AttesoCatalogo("M-CAT5E-2", "Cavo Mogami CAT5E - 2 metri", Decimal("16.00"), 2, "CAVI", marca="MOGAMI"),
+    AttesoCatalogo("M-CAT5E-3", "Cavo Mogami CAT5E - 3 metri guaina nera", Decimal("19.00"), 2, "CAVI",
+                   marca="MOGAMI"),
     AttesoCatalogo("P04-AMT", "Diffusore passivo 2 Vie 4x3,5 woofer high quality Potenza 200W/4ohm "
                    "Dimensioni 506x107x118mm", Decimal("2432.00"), 3, _P),
     AttesoCatalogo("P12-AMT", "Diffusore passivo Bass Reflex 12x3,5 woofer Peso 8,8kg", Decimal("3553.00"), 3, _P),
@@ -104,7 +111,8 @@ def attesi(linee: bool) -> list[AttesoCatalogo]:
     if linee:
         return ATTESI
     return [AttesoCatalogo("Super Splitter Duo" if a.modello == "Super Splitter Duo" else a.modello,
-                           a.descrizione, a.prezzo, a.pagina, a.categoria, a.anomalie) for a in ATTESI if a.pagina < 3]
+                           a.descrizione, a.prezzo, a.pagina, a.categoria, a.anomalie, a.marca)
+            for a in ATTESI if a.pagina < 3]
 
 
 def _scrivi(page, x, y, testo, corpo=CORPO):
@@ -147,6 +155,11 @@ def crea_catalogo(percorso: str | Path, linee: bool = True) -> Path:
                     _scrivi(page, X_DESC, y + i * PASSO, testo)
                 y += (len(caratteristiche) + 1) * PASSO
                 continue
+            if elem[0] == "titolo":  # titolo di sezione in corpo 12, su una fascia sua
+                y += 4
+                _scrivi(page, X_ART, y, elem[1], 12)
+                y += 16
+                continue
             if elem[0] == "tabella":
                 _, marca, titolo = elem
                 _scrivi(page, X_MARCA, y, marca, 10)
@@ -169,7 +182,9 @@ def crea_catalogo(percorso: str | Path, linee: bool = True) -> Path:
                         _a_destra(page, col, partenza + i * PASSO, testo)
                     else:
                         _scrivi(page, col, partenza + i * PASSO, testo)
-            if bollino:  # in grande sotto il codice, nell'ultima riga della sua cella
+            if bollino and isinstance(bollino[0], tuple):  # in grande a sinistra del codice, a meta' della cella
+                _scrivi(page, X_BOLLINO, y + (righe - 1) * PASSO / 2 + 2, bollino[0][1], 12)
+            elif bollino:  # in grande sotto il codice, nell'ultima riga della sua cella
                 _scrivi(page, X_ART, y + (righe - 1) * PASSO, bollino[0], 12)
             y += righe * PASSO
     doc.save(percorso)

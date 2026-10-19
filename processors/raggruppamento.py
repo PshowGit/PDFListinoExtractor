@@ -223,6 +223,46 @@ def fasce_centrate(ys: list[float], ancore: list[float], tagli: list[float], tol
     return out
 
 
+# larghezza massima di un bollino, in corpi del testo: «NEW» in corpo 12 su un catalogo in corpo 9 e' largo 3,1
+LARGHEZZA_BOLLINO = 4
+# corpo massimo di un bollino, in corpi del testo: «NEW» e' in corpo 12 su 9 (1,33); i loghi di serie
+# accanto al testo introduttivo («HS SERIE PASSIVE Speaker») sono in corpo 16-18 (da 1,78)
+CORPO_BOLLINO = 1.5
+# scarto ammesso fra il corpo di una riga e il corpo del testo del documento
+SCARTO_CORPO = 0.15
+
+
+def _distanza(a: Riga, b: Riga) -> float:
+    """Distanza verticale fra due righe: zero se si sovrappongono."""
+    return max(0.0, max(a.y0, b.y0) - min(a.y1, b.y1))
+
+
+def a_fianco_dei_dati(titolo: Riga, righe_dati: list[Riga], righe_ancora: list[Riga], intestazioni: list[float],
+                      corpo: float, passo: float, tolleranza: float) -> bool:
+    """Un titolo che e' un bollino accanto a un articolo, non un titolo di sezione.
+
+    Il «NEW» del catalogo Etabeta (corpo 12) sta di fianco alla descrizione di un articolo, a sinistra del
+    codice o nella sua colonna: diventava la categoria degli articoli seguenti (52 articoli) e tagliava
+    l'articolo in due. Un titolo di sezione occupa invece una fascia sua. Il bollino e' una parola sola,
+    stretta e appena piu' grande del testo; sta alla stessa altezza di righe di dati nel corpo del testo (sovrapposte in tutto per piu' di
+    `tolleranza`: a pagina 17 sta a cavallo di due righe) e dentro un articolo, cioe' a meno di un `passo` da
+    una riga della colonna d'ancoraggio o sotto una di esse senza un'intestazione in mezzo (nelle schede il
+    codice e' in cima e il bollino piu' in basso). Senza le ultime due condizioni passavano per bollini
+    «Vari», seconda riga del titolo «Accessori / Vari» accanto a testo promozionale in corpo 11, e i loghi di
+    serie («ALA», «VS») accanto al testo introduttivo prima della prima tabella della pagina: l'introduzione
+    finiva nell'articolo della pagina precedente; senza il limite sul corpo, quelli fra due tabelle («HS»).
+    """
+    if (len(titolo.testo.split()) != 1 or titolo.x1 - titolo.x0 > LARGHEZZA_BOLLINO * corpo
+            or titolo.size > CORPO_BOLLINO * corpo):
+        return False
+    sovrapposto = sum(max(0.0, min(titolo.y1, r.y1) - max(titolo.y0, r.y0))
+                      for r in righe_dati if abs(r.size - corpo) <= SCARTO_CORPO * corpo)
+    if sovrapposto <= tolleranza:
+        return False
+    return any(_distanza(titolo, r) <= passo
+               or (r.y0 < titolo.y0 and not any(r.y0 < y < titolo.y0 for y in intestazioni)) for r in righe_ancora)
+
+
 def nella_fascia(riga: Riga, fascia: tuple[float, float], tolleranza: float) -> bool:
     inizio, fine = fascia
     return inizio - tolleranza <= riga.y0 < fine - tolleranza

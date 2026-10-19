@@ -355,6 +355,12 @@ class ParserListino:
         intest = getattr(t, "intestazioni", [])
         if separatori and n_ancora is not None:
             t.titoli = [r for r in t.titoli if not self._e_bollino(r, t.righe.get(n_ancora, []), separatori)]
+        # anche fuori dalla griglia: una parola stretta accanto ai dati di un articolo e' un bollino («NEW»)
+        if n_ancora is not None:
+            dati = [r for righe in t.righe.values() for r in righe]
+            ancore = [r for r in t.righe.get(n_ancora, []) if self._e_ancora(r, self.ancora, t.colonne[n_ancora])]
+            t.titoli = [r for r in t.titoli if not raggruppamento.a_fianco_dei_dati(
+                r, dati, ancore, [i.y0 for i in intest], self.metr.corpo, self.passo_ancora, tol)]
         # una linea divisoria e' il bordo superiore di una cella, e il riquadro del testo dentro la cella
         # la sfiora da sopra (Etabeta: linea a 59,7, testo da 59,5): taglia quindi una tolleranza piu' in alto,
         # o la prima riga di ogni cella finisce nella cella precedente
