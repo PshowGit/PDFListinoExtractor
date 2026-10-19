@@ -101,6 +101,7 @@ def test_proposta_del_campo_dal_contenuto(testi, campo):
 def test_wizard_sul_pdf_jbl_sintetico_riproduce_il_profilo_scritto_a_mano(pdf_sintetico, regole):
     a = analizza_pdf(str(pdf_sintetico), 1)
     assert [c.campo_proposto for c in a.colonne] == ["identificativo", "descrizione", "prezzo"]
+    assert a.pagina_consigliata is None  # la pagina 1 e' gia' una tabella: il wizard non propone di spostarsi
     dal_wizard = estrai_listino(pdf_sintetico, profilo_da_analisi(a, [c.campo_proposto for c in a.colonne])).articoli
     assert [(x.modello, x.codice, x.ean, x.descrizione, x.prezzo) for x in dal_wizard] == [
         (t.modello, t.codice, t.ean, t.descrizione, t.prezzo) for t in ATTESI_JBL]
@@ -109,6 +110,7 @@ def test_wizard_sul_pdf_jbl_sintetico_riproduce_il_profilo_scritto_a_mano(pdf_si
 @pytest.mark.skipif(not CAMPIONE_REALE.is_file(), reason="listino campione non presente in samples/")
 def test_wizard_sul_listino_reale_coincide_col_profilo_distribuito(regole):
     a = analizza_pdf(str(CAMPIONE_REALE), 1)
+    assert a.pagina_consigliata is None  # 3 prezzi su una mediana di 5: non e' una pagina debole
     dal_wizard = estrai_listino(CAMPIONE_REALE, profilo_da_analisi(a, [c.campo_proposto for c in a.colonne]))
     distribuito = estrai_listino(CAMPIONE_REALE, regole)
     chiave = [(x.modello, x.codice, x.ean, x.descrizione, x.prezzo, x.categoria) for x in distribuito.articoli]

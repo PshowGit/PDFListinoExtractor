@@ -168,3 +168,14 @@ def test_etabeta_casi_misurati(etabeta):
     assert per[(13, "HBTY")].valore("marca") == "VISSONIC"
     # legature ricomposte nei dati
     assert not any(c in x.descrizione for x in ris.articoli for c in "ﬀﬁﬂﬃƟƩƫ")
+
+
+@reale
+def test_etabeta_dall_indice_il_wizard_consiglia_una_tabella():
+    # pagina 1 e' l'indice, senza prezzi: la proposta li' e' sbagliata
+    assert analizza_pdf(str(ETABETA), 1).pagina_consigliata == 13
+    a = analizza_pdf(str(ETABETA), 13)
+    assert [c.campo_proposto for c in a.colonne] == ["marca", "modello", "descrizione", "prezzo"]
+    # la fine della descrizione non scavalca i prezzi (un testo a tutta larghezza la portava a 0,95)
+    p = profilo_da_analisi(a, [c.campo_proposto for c in a.colonne])
+    assert p["colonne"][2]["x_fine_relativo"] < p["colonne"][3]["x_relativo"]

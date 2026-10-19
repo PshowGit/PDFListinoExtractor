@@ -4,8 +4,9 @@ import pytest
 
 import config
 from config import RegoleNonValide, _leggi, salva_fornitore_personale, valida_schema
-from processors.analisi_layout import analizza_pdf
+from processors.analisi_layout import DensitaPagina, analizza, analizza_pdf, pagina_consigliata
 from processors.estrazione import estrai_listino
+from processors.models import Span
 from processors.wizard import ModelloWizard
 from tests.sintetico_generico import crea_listino_generico
 
@@ -269,3 +270,63 @@ def test_wizard_propone_la_marca_sul_catalogo(tmp_path):
     marca = p["colonne"][0]
     assert (marca["campo"], marca["intestazioni"], "etichetta" in marca) == ("marca", [], False)
     assert [c.etichetta for c in colonne_uscita(normalizza(p))] == ["Marca", "Articolo", "Descrizione", "Listino"]
+
+
+# --- pagina da cui partire -----------------------------------------------------------------------
+
+def _densita(*righe):
+    return [DensitaPagina(n, prezzi, intestazione) for n, prezzi, intestazione in righe]
+
+
+def test_pagina_consigliata_quando_la_pagina_non_ha_prezzi():
+    # come il campione dell'Etabeta: pagina 1 l'indice, la 13 la prima tabella piena
+    campione = _densita((1, 0, False), (13, 17, True), (25, 9, False), (37, 6, True), (49, 5, True))
+    assert pagina_consigliata(campione, 1) == 13
+    assert pagina_consigliata(campione, 25) is None  # 9 prezzi su una mediana di 7,5: e' una tabella
+    assert pagina_consigliata(campione, 13) is None
+
+
+def test_pagina_consigliata_preferisce_una_pagina_con_intestazione():
+    campione = _densita((1, 0, False), (2, 20, False), (3, 15, True), (4, 4, True))
+    assert pagina_consigliata(campione, 1) == 3
+    assert pagina_consigliata(_densita((1, 0, False), (2, 20, False), (3, 15, False)), 1) == 2  # se nessuna ce l'ha
+
+
+def test_nessuna_pagina_consigliata_senza_prezzi_nel_campione():
+    assert pagina_consigliata(_densita((1, 0, False), (2, 0, True)), 1) is None
+
+
+def test_catalogo_che_comincia_con_l_indice(tmp_path):
+    import pymupdf
+
+    from tests.sintetico_catalogo import crea_catalogo
+
+    catalogo = crea_catalogo(tmp_path / "c.pdf")
+    with pymupdf.open(catalogo) as doc:
+        indice = doc.new_page(pno=0, width=595.2, height=842)
+        for i, voce in enumerate(("Sommario", "VISSONIC  da Pagina 4", "ARX  da Pagina 4", "MOGAMI  da Pagina 5")):
+            indice.insert_text((70, 80 + 14 * i), voce, fontsize=9, fontname="helv")
+        doc.save(tmp_path / "con_indice.pdf")
+    a = analizza_pdf(str(tmp_path / "con_indice.pdf"), 1)
+    assert a.pagina_consigliata == 2
+    assert [(d.numero, d.intestazione) for d in a.pagine_campione][:2] == [(1, False), (2, True)]
+    consigliata = analizza_pdf(str(tmp_path / "con_indice.pdf"), a.pagina_consigliata)
+    assert [c.campo_proposto for c in consigliata.colonne] == ["marca", "modello", "descrizione", "prezzo"]
+    assert consigliata.pagina_consigliata is None
+
+
+def test_la_fine_di_una_colonna_non_scavalca_la_successiva():
+    # una riga di descrizione a tutta larghezza (pagina 13 dell'Etabeta) non porta la fine della colonna sopra i
+    # prezzi: sulle pagine senza intestazione la descrizione si sarebbe presa i prezzi
+    def s(testo, x, y, x1=None):
+        return Span(testo, x, y, x1 if x1 is not None else x + 5 * len(testo), y + 9, 9, 1)
+
+    spans = [s("Articolo", 100, 100), s("Descrizione", 200, 100), s("Prezzo", 450, 100)]
+    for i in range(5):
+        y = 120 + 12 * i
+        spans += [s(f"AB-{i}00", 100, y), s(f"Descrizione breve {i}", 200, y), s(f"{i + 1}0,00", 455, y, 480)]
+    spans.append(s("Testo lungo che attraversa la pagina fin sotto i prezzi", 200, 190, 520))
+    a = analizza({1: (spans, 595.2, 842)}, 1)
+    descrizione, prezzo = a.colonne[1], a.colonne[2]
+    assert (descrizione.campo_proposto, prezzo.campo_proposto) == ("descrizione", "prezzo")
+    assert descrizione.fine_testo < prezzo.x0

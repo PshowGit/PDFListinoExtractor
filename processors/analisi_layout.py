@@ -60,6 +60,15 @@ class ColonnaRilevata:
     etichetta_completa: str = ""  # l'etichetta con le sue righe seguenti («Prezzo al Pubblico»): per il nome
 
 
+@dataclass(frozen=True)
+class DensitaPagina:
+    """Quanto una pagina del campione sembra una tabella di prezzi: serve a non partire dall'indice."""
+
+    numero: int
+    prezzi: int  # scritte con l'aspetto di un prezzo, fuori da testate e intestazioni
+    intestazione: bool  # se ha una riga d'intestazione riconosciuta
+
+
 @dataclass
 class AnalisiLayout:
     percorso: str
@@ -76,6 +85,9 @@ class AnalisiLayout:
     regex_codice_proposta: str | None = None
     linee_divisorie_proposte: bool = False
     avvisi: list[str] = field(default_factory=list)
+    pagine_campione: list[DensitaPagina] = field(default_factory=list)
+    # una pagina con una tabella, quando quella analizzata sembra un indice o una copertina (v. pagina_consigliata)
+    pagina_consigliata: int | None = None
 
 
 def _profilo_generico() -> dict:
@@ -272,6 +284,10 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
             campo = MARCA
         x1 = xs[i + 1] - 1 if i + 1 < len(xs) else larghezza
         fine = max([s.x1 for s in spans_col[i]] + ([fisiche[i].x1] if fisiche[i].x1 else []), default=None)
+        if fine is not None:
+            # non oltre l'inizio della colonna dopo: sulla pagina 13 dell'Etabeta un testo a tutta larghezza portava
+            # la fine della descrizione sopra i prezzi, e sulle pagine senza intestazione i prezzi andavano persi
+            fine = min(fine, x1)
         colonne.append(ColonnaRilevata(x, x1, etichetta, campo, esempi[i], intest is not None, len(testi[i]), fine,
                                        complete[i]))
 
@@ -289,11 +305,37 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
     parser = ParserListino(profilo_da_analisi(analisi, [c.campo_proposto for c in colonne]))
     parser.prepara(list(pagine.values()))
     analisi.ancora_proposta = parser.ancora
+    analisi.pagine_campione = [DensitaPagina(n, sum(1 for s in corpo if _sembra_prezzo(s.testo)), prima is not None)
+                               for n, (corpo, prima) in sorted(letture.items())]
+    analisi.pagina_consigliata = pagina_consigliata(analisi.pagine_campione, pagina)
     return analisi
 
 
 QUOTA_ALLINEAMENTO = 0.5
 QUOTA_COLONNA_VUOTA = 0.1
+# una pagina con meno di questa quota dei prezzi di una pagina tipica del campione non e' una tabella
+QUOTA_PAGINA_DEBOLE = 0.25
+
+
+def pagina_consigliata(densita: list[DensitaPagina], pagina: int) -> int | None:
+    """Una pagina da cui partire, se quella analizzata non sembra una tabella di prezzi; altrimenti None.
+
+    La prima pagina di un catalogo e' spesso copertina o indice: sull'Etabeta la pagina 1 non ha prezzi e la
+    proposta li' e' sbagliata (6.465 «articoli», colonne «Colonna 1/2/3»). Una pagina e' debole se ha meno di
+    QUOTA_PAGINA_DEBOLE della mediana dei prezzi delle pagine del campione che ne hanno; si consiglia la
+    prima con almeno la mediana e un'intestazione, o in mancanza la prima con almeno la mediana. La pagina 1
+    del listino JBL (3 prezzi su una mediana di 5) non e' debole e la sua proposta non cambia.
+    """
+    con_prezzi = [d.prezzi for d in densita if d.prezzi]
+    attuale = next((d for d in densita if d.numero == pagina), None)
+    if not con_prezzi or attuale is None:
+        return None
+    mediana = statistics.median(con_prezzi)
+    if attuale.prezzi >= QUOTA_PAGINA_DEBOLE * mediana:
+        return None
+    piene = [d for d in densita if d.prezzi >= mediana]
+    scelta = next((d for d in piene if d.intestazione), piene[0] if piene else None)
+    return scelta.numero if scelta is not None and scelta.numero != pagina else None
 
 
 def allineamento(righe: list[Riga]) -> float:
