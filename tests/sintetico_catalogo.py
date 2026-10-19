@@ -119,6 +119,18 @@ def attesi(linee: bool) -> list[AttesoCatalogo]:
             for a in ATTESI if a.pagina < 3]
 
 
+def crea_catalogo_con_indice(percorso: str | Path) -> Path:
+    """Il catalogo con griglia preceduto da una pagina d'indice senza prezzi, come la pagina 1 dell'Etabeta."""
+    percorso = Path(percorso)
+    catalogo = crea_catalogo(percorso.with_name(percorso.stem + "_senza_indice.pdf"))
+    with pymupdf.open(catalogo) as doc:
+        indice = doc.new_page(pno=0, width=595.2, height=842)
+        for i, voce in enumerate(("Sommario", "VISSONIC  da Pagina 4", "ARX  da Pagina 4", "MOGAMI  da Pagina 5")):
+            _scrivi(indice, 70, 80 + 14 * i, voce)
+        doc.save(percorso)
+    return percorso
+
+
 def _scrivi(page, x, y, testo, corpo=CORPO):
     page.insert_text((x, y), testo, fontsize=corpo, fontname="helv")
 

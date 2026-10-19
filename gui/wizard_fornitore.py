@@ -30,6 +30,9 @@ from processors.wizard import (
     ETICHETTE_CAMPO,
     ETICHETTE_FORMATO,
     ModelloWizard,
+    pagine_del_campione,
+    prossima_tabella,
+    voce_pagina,
 )
 
 log = logging.getLogger(__name__)
@@ -87,6 +90,9 @@ class WizardFornitore(ctk.CTkToplevel):
         self._geometria = None
         self._evidenziato = None  # l'articolo scelto nella tabella o sulla pagina
         self.riquadri_articoli: list[tuple[object, tuple[float, float, float, float]]] = []
+        # alla prima analisi di un PDF, se la pagina e' un indice si passa da soli a quella consigliata
+        self._salto_automatico = pdf is not None
+        self._nota_salto = ""
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -110,28 +116,41 @@ class WizardFornitore(ctk.CTkToplevel):
     def _barra_comandi(self):
         f = ctk.CTkFrame(self)
         f.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 6))
-        self.btn_apri = ctk.CTkButton(f, text="Apri PDF…", width=110, command=self._apri_pdf)
-        self.btn_apri.pack(side="left", padx=8, pady=8)
-        self.lbl_pdf = ctk.CTkLabel(f, text="Nessun PDF", anchor="w", width=320)
-        self.lbl_pdf.pack(side="left", padx=4)
-        ctk.CTkLabel(f, text="Pagina").pack(side="left", padx=(16, 4))
-        self.btn_prec = ctk.CTkButton(f, text="◀", width=32, command=lambda: self._vai(self.pagina - 1))
+        # due righe: il PDF e lo zoom; sotto, la scelta della pagina (non ci stanno in una alla larghezza minima)
+        sopra = ctk.CTkFrame(f, fg_color="transparent")
+        sopra.pack(fill="x", padx=4, pady=(6, 2))
+        sotto = ctk.CTkFrame(f, fg_color="transparent")
+        sotto.pack(fill="x", padx=4, pady=(2, 6))
+        self.btn_apri = ctk.CTkButton(sopra, text="Apri PDF…", width=110, command=self._apri_pdf)
+        self.btn_apri.pack(side="left", padx=4)
+        self.lbl_pdf = ctk.CTkLabel(sopra, text="Nessun PDF", anchor="w")
+        self.lbl_pdf.pack(side="left", padx=8, fill="x", expand=True)
+        ctk.CTkButton(sopra, text="+", width=32, command=lambda: self._cambia_zoom(1)).pack(side="right", padx=(4, 4))
+        self.lbl_zoom = ctk.CTkLabel(sopra, text="100%", width=50)
+        self.lbl_zoom.pack(side="right")
+        ctk.CTkButton(sopra, text="−", width=32, command=lambda: self._cambia_zoom(-1)).pack(side="right", padx=4)
+        ctk.CTkLabel(sopra, text="Zoom").pack(side="right", padx=4)
+        ctk.CTkLabel(sotto, text="Pagina").pack(side="left", padx=(4, 4))
+        self.btn_prec = ctk.CTkButton(sotto, text="◀", width=32, command=lambda: self._vai(self.pagina - 1))
         self.btn_prec.pack(side="left")
-        self.ent_pagina = ctk.CTkEntry(f, width=56, justify="center")
+        self.ent_pagina = ctk.CTkEntry(sotto, width=56, justify="center")
         self.ent_pagina.insert(0, "1")
         self.ent_pagina.bind("<Return>", lambda e: self._vai_a_testo())
         self.ent_pagina.pack(side="left", padx=4)
-        self.btn_succ = ctk.CTkButton(f, text="▶", width=32, command=lambda: self._vai(self.pagina + 1))
+        self.btn_succ = ctk.CTkButton(sotto, text="▶", width=32, command=lambda: self._vai(self.pagina + 1))
         self.btn_succ.pack(side="left")
-        self.lbl_totale = ctk.CTkLabel(f, text="", width=60)
+        self.lbl_totale = ctk.CTkLabel(sotto, text="", width=60)
         self.lbl_totale.pack(side="left", padx=4)
-        self.btn_analizza = ctk.CTkButton(f, text="Analizza pagina", width=130, command=self._analizza)
+        self.btn_analizza = ctk.CTkButton(sotto, text="Analizza pagina", width=130, command=self._analizza)
         self.btn_analizza.pack(side="left", padx=8)
-        ctk.CTkButton(f, text="+", width=32, command=lambda: self._cambia_zoom(1)).pack(side="right", padx=(4, 8))
-        self.lbl_zoom = ctk.CTkLabel(f, text="100%", width=50)
-        self.lbl_zoom.pack(side="right")
-        ctk.CTkButton(f, text="−", width=32, command=lambda: self._cambia_zoom(-1)).pack(side="right", padx=4)
-        ctk.CTkLabel(f, text="Zoom").pack(side="right", padx=4)
+        # le pagine del campione, segnate «tabella» o «indice o divisorio», e il salto alla prossima tabella
+        ctk.CTkLabel(sotto, text="Pagine del campione").pack(side="left", padx=(16, 4))
+        self._voci_campione: dict[str, int] = {}
+        self.menu_campione = ctk.CTkOptionMenu(sotto, values=["—"], width=230, dynamic_resizing=False,
+                                               command=self._scegli_pagina_campione)
+        self.menu_campione.pack(side="left", padx=4)
+        self.btn_tabella = ctk.CTkButton(sotto, text="Prossima tabella ▶▶", width=150, command=self._prossima_tabella)
+        self.btn_tabella.pack(side="left", padx=4)
 
     def _area_pagina(self):
         cornice = tk.Frame(self, background="#777777")
@@ -214,6 +233,7 @@ class WizardFornitore(ctk.CTkToplevel):
             self.pdf = Path(percorso)
             self.pagina = 1
             self.pagine_totali = None
+            self._salto_automatico = True
             self._analizza()
 
     def _vai(self, pagina: int):
@@ -264,19 +284,50 @@ class WizardFornitore(ctk.CTkToplevel):
         self._costruisci_colonne()
         self._mostra_opzioni()
         self._ridisegna()
+        self._aggiorna_campione(analisi)
         avvisi = " ".join(analisi.avvisi)
         if ritrovate is None:
-            self._stato(
-                f"Pagina {analisi.pagina}: {len(analisi.colonne)} colonne, ancora proposta «"
-                f"{ETICHETTE_ANCORA.get(analisi.ancora_proposta, analisi.ancora_proposta)}». {avvisi}"
-            )
+            testo = (f"Pagina {analisi.pagina}: {len(analisi.colonne)} colonne, ancora proposta «"
+                     f"{ETICHETTE_ANCORA.get(analisi.ancora_proposta, analisi.ancora_proposta)}». {avvisi}")
         else:
             altre = len(analisi.colonne) - ritrovate
-            self._stato(
-                f"Pagina {analisi.pagina}: {ritrovate} colonne su {len(analisi.colonne)} riprese dal fornitore salvato"
-                + (f"; {altre} con la proposta dell'analisi, da controllare." if altre else ".") + f" {avvisi}"
-            )
+            testo = (f"Pagina {analisi.pagina}: {ritrovate} colonne su {len(analisi.colonne)} riprese dal fornitore "
+                     f"salvato" + (f"; {altre} con la proposta dell'analisi, da controllare." if altre else ".")
+                     + f" {avvisi}")
+        consigliata = analisi.pagina_consigliata
+        if consigliata and not self._salto_automatico:
+            testo = (f"Questa pagina non sembra una tabella di prezzi: la proposta qui puo' essere sbagliata. "
+                     f"Prova la pagina {consigliata} (menu delle pagine o «Prossima tabella»). ") + testo
+        self._stato(self._nota_salto + testo)
+        self._nota_salto = ""
         self._aggiorna_comandi()
+        if self._salto_automatico:
+            self._salto_automatico = False
+            if consigliata:
+                prezzi = next((d.prezzi for d in analisi.pagine_campione if d.numero == analisi.pagina), 0)
+                self._nota_salto = (f"La pagina {analisi.pagina} sembra un indice o una copertina ({prezzi} prezzi): "
+                                    f"analizzata la pagina {consigliata}, la prima con una tabella. ")
+                self._vai(consigliata)
+
+    def _aggiorna_campione(self, analisi) -> None:
+        """Il menu delle pagine del campione, con la pagina analizzata scelta."""
+        voci = {voce_pagina(*p): p[0] for p in pagine_del_campione(analisi)}
+        self._voci_campione = voci
+        if voci:
+            self.menu_campione.configure(values=list(voci))
+            self.menu_campione.set(next((v for v, n in voci.items() if n == analisi.pagina), f"pag. {analisi.pagina}"))
+
+    def _scegli_pagina_campione(self, voce: str) -> None:
+        if voce in self._voci_campione:
+            self._vai(self._voci_campione[voce])
+
+    def _prossima_tabella(self) -> None:
+        if self.modello is not None:
+            prossima = prossima_tabella(self.modello.analisi, self.pagina)
+            if prossima is None:
+                self._stato("Nessun'altra pagina del campione ha una tabella di prezzi.")
+            else:
+                self._vai(prossima)
 
     def _lavoro_fallito(self, messaggio: str):
         self._lavoro = None
@@ -581,6 +632,8 @@ class WizardFornitore(ctk.CTkToplevel):
         self.btn_apri.configure(state=stato(not occupato))
         for b in (self.btn_prec, self.btn_succ, self.btn_analizza):
             b.configure(state=stato(self.pdf is not None and not occupato))
+        for b in (self.menu_campione, self.btn_tabella):
+            b.configure(state=stato(pronto))
         self.btn_anteprima.configure(state=stato(pronto))
         self.btn_salva.configure(state=stato(pronto))
 

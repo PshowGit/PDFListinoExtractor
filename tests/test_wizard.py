@@ -7,7 +7,7 @@ from config import RegoleNonValide, _leggi, salva_fornitore_personale, valida_sc
 from processors.analisi_layout import DensitaPagina, analizza, analizza_pdf, pagina_consigliata
 from processors.estrazione import estrai_listino
 from processors.models import Span
-from processors.wizard import ModelloWizard
+from processors.wizard import ModelloWizard, pagine_del_campione, prossima_tabella, voce_pagina
 from tests.sintetico_generico import crea_listino_generico
 
 
@@ -297,22 +297,30 @@ def test_nessuna_pagina_consigliata_senza_prezzi_nel_campione():
 
 
 def test_catalogo_che_comincia_con_l_indice(tmp_path):
-    import pymupdf
+    from tests.sintetico_catalogo import crea_catalogo_con_indice
 
-    from tests.sintetico_catalogo import crea_catalogo
-
-    catalogo = crea_catalogo(tmp_path / "c.pdf")
-    with pymupdf.open(catalogo) as doc:
-        indice = doc.new_page(pno=0, width=595.2, height=842)
-        for i, voce in enumerate(("Sommario", "VISSONIC  da Pagina 4", "ARX  da Pagina 4", "MOGAMI  da Pagina 5")):
-            indice.insert_text((70, 80 + 14 * i), voce, fontsize=9, fontname="helv")
-        doc.save(tmp_path / "con_indice.pdf")
-    a = analizza_pdf(str(tmp_path / "con_indice.pdf"), 1)
+    pdf = str(crea_catalogo_con_indice(tmp_path / "con_indice.pdf"))
+    a = analizza_pdf(pdf, 1)
     assert a.pagina_consigliata == 2
     assert [(d.numero, d.intestazione) for d in a.pagine_campione][:2] == [(1, False), (2, True)]
-    consigliata = analizza_pdf(str(tmp_path / "con_indice.pdf"), a.pagina_consigliata)
+    consigliata = analizza_pdf(pdf, a.pagina_consigliata)
     assert [c.campo_proposto for c in consigliata.colonne] == ["marca", "modello", "descrizione", "prezzo"]
     assert consigliata.pagina_consigliata is None
+    # il selettore di pagina del wizard: l'indice segnato a parte, la prossima tabella dopo ogni pagina
+    voci = [voce_pagina(*p) for p in pagine_del_campione(a)]
+    assert voci[0] == "○ pag. 1 · indice o divisorio" and voci[1].startswith("✔ pag. 2 · ")
+    assert prossima_tabella(a, 1) == 2 and prossima_tabella(a, 2) == 3
+
+
+def test_prossima_tabella_ricomincia_dall_inizio():
+    from processors.analisi_layout import AnalisiLayout
+
+    a = AnalisiLayout("", 1, 5, 595, 842, [], None, "auto", 9, 11,
+                      pagine_campione=_densita((1, 0, False), (2, 10, True), (3, 0, False), (4, 12, True)))
+    assert [n for n, tabella, _ in pagine_del_campione(a) if tabella] == [2, 4]
+    assert prossima_tabella(a, 2) == 4 and prossima_tabella(a, 4) == 2 and prossima_tabella(a, 3) == 4
+    solo = AnalisiLayout("", 1, 2, 595, 842, [], None, "auto", 9, 11, pagine_campione=_densita((1, 0, False), (2, 10, True)))
+    assert prossima_tabella(solo, 2) is None  # nessun'altra pagina con una tabella
 
 
 def test_la_fine_di_una_colonna_non_scavalca_la_successiva():

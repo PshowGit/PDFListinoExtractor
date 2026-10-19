@@ -149,7 +149,10 @@ lavora dal sorgente, in `%LOCALAPPDATA%\PDFListinoExtractor\logs\app.log` nel pr
 
 Nella finestra principale: **Configura nuovo fornitore…**
 
-1. **Apri PDF…** e scegli una pagina rappresentativa (◀ ▶). La pre-analisi, eseguita in un processo separato,
+1. **Apri PDF…** e scegli una pagina rappresentativa (◀ ▶). Il menu **Pagine del campione** segna le pagine
+   con una tabella di prezzi (✔) e quelle che sembrano indice o divisori (○); **Prossima tabella ▶▶** va alla
+   successiva. Se la prima pagina è un indice o una copertina, il wizard passa da solo alla prima pagina con una
+   tabella e lo scrive in basso (con ◀ si torna indietro). La pre-analisi, eseguita in un processo separato,
    trova la riga d'intestazione e le colonne e le evidenzia sulla pagina, un colore per campo. Riconosce le
    intestazioni per sinonimi: «SKU», «Part Number», «Cod. art.» valgono come Codice. Se l'intestazione manca,
    ricostruisce le colonne dalla posizione del testo, con i prezzi allineati a destra trattati a parte.
@@ -165,7 +168,9 @@ Nella finestra principale: **Configura nuovo fornitore…**
    il prezzo, un articolo senza prezzo si fonderebbe con quello sopra.
 4. Formato dei prezzi, codici tra parentesi (nel PDF ed eventualmente nell'Excel), linee orizzontali come
    separatori, nome del fornitore.
-5. **Anteprima pagina** estrae solo quella pagina e mostra la tabella con le anomalie. **Salva fornitore** lo
+5. **Anteprima pagina** estrae solo quella pagina e mostra la tabella con le anomalie. Sulla pagina disegna un
+   riquadro numerato per articolo, i titoli di sezione in rosso (diventano la categoria) e i bollini ignorati
+   in grigio; un clic su una riga ritrova l'articolo sulla pagina, e viceversa. **Salva fornitore** lo
    aggiunge al menu «Fornitore» della finestra principale.
 
 Il fornitore finisce in `%LOCALAPPDATA%\PDFListinoExtractor\supplier_rules.json`. Il file è in UTF-8 con BOM

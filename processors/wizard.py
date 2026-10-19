@@ -7,7 +7,7 @@ cosi' la parte che decide cosa finisce nel file delle regole si prova senza apri
 Per modificare un fornitore gia' salvato, `applica_profilo` riporta la sua mappatura sulle colonne
 trovate nella pagina analizzata; al salvataggio `profilo` conserva le regole che il wizard non mostra.
 """
-from processors.analisi_layout import AnalisiLayout, ColonnaRilevata, profilo_da_analisi
+from processors.analisi_layout import AnalisiLayout, ColonnaRilevata, pagine_con_tabella, profilo_da_analisi
 from processors.models import INTESTAZIONI, MARCA, TESTO_GENERICO
 from processors.profilo import (
     CAMPI_ANCORA,
@@ -48,6 +48,22 @@ COLORI_CAMPO = {
     TESTO_GENERICO: "#17BECF",
     MARCA: "#E377C2",
 }
+
+
+def pagine_del_campione(analisi: AnalisiLayout) -> list[tuple[int, bool, int]]:
+    """Le pagine del campione con (numero, se ha una tabella, prezzi), per il selettore di pagina del wizard."""
+    tabelle = pagine_con_tabella(analisi.pagine_campione)
+    return [(d.numero, d.numero in tabelle, d.prezzi) for d in analisi.pagine_campione]
+
+
+def voce_pagina(numero: int, tabella: bool, prezzi: int) -> str:
+    return f"✔ pag. {numero} · {prezzi} prezzi" if tabella else f"○ pag. {numero} · indice o divisorio"
+
+
+def prossima_tabella(analisi: AnalisiLayout, pagina: int) -> int | None:
+    """La prossima pagina del campione con una tabella dopo `pagina`, ricominciando dall'inizio; None se nessuna."""
+    tabelle = sorted(n for n, tabella, _ in pagine_del_campione(analisi) if tabella and n != pagina)
+    return next((n for n in tabelle if n > pagina), tabelle[0] if tabelle else None)
 
 
 def campi_di(campo_colonna: str) -> set[str]:

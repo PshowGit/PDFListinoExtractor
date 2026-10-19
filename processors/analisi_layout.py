@@ -331,15 +331,21 @@ def pagina_consigliata(densita: list[DensitaPagina], pagina: int) -> int | None:
     del listino JBL (3 prezzi su una mediana di 5) non e' debole e la sua proposta non cambia.
     """
     con_prezzi = [d.prezzi for d in densita if d.prezzi]
-    attuale = next((d for d in densita if d.numero == pagina), None)
-    if not con_prezzi or attuale is None:
+    if not con_prezzi or pagina not in {d.numero for d in densita} or pagina in pagine_con_tabella(densita):
         return None
     mediana = statistics.median(con_prezzi)
-    if attuale.prezzi >= QUOTA_PAGINA_DEBOLE * mediana:
-        return None
     piene = [d for d in densita if d.prezzi >= mediana]
     scelta = next((d for d in piene if d.intestazione), piene[0] if piene else None)
     return scelta.numero if scelta is not None and scelta.numero != pagina else None
+
+
+def pagine_con_tabella(densita: list[DensitaPagina]) -> set[int]:
+    """Le pagine del campione che non sono deboli: almeno QUOTA_PAGINA_DEBOLE della mediana dei prezzi."""
+    con_prezzi = [d.prezzi for d in densita if d.prezzi]
+    if not con_prezzi:
+        return set()
+    mediana = statistics.median(con_prezzi)
+    return {d.numero for d in densita if d.prezzi and d.prezzi >= QUOTA_PAGINA_DEBOLE * mediana}
 
 
 def allineamento(righe: list[Riga]) -> float:

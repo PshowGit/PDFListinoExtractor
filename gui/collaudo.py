@@ -145,6 +145,9 @@ def _collauda_wizard(pdf: Path, regole: Path, report: dict, pagina: int = 1) -> 
     radice.withdraw()
     w = WizardFornitore(radice, config.elenco_fornitori(), pdf=pdf, percorso_regole=regole)
     w.pagina = pagina  # prima che parta l'analisi, programmata dal costruttore
+    # la pagina la sceglie chi lancia il collaudo: niente salto alla pagina consigliata, che ripartirebbe con
+    # l'analisi mentre il collaudo chiede gia' l'anteprima
+    w._salto_automatico = False
     w.geometry("1440x920+10+10")
     w.attributes("-topmost", True)
 

@@ -276,6 +276,29 @@ def test_wizard_disegna_l_anteprima_sulla_pagina(radice, tmp_path):
         w.chiudi()
 
 
+def test_wizard_salta_l_indice_e_segna_le_pagine(radice, tmp_path):
+    from gui.wizard_fornitore import WizardFornitore
+    from tests.sintetico_catalogo import crea_catalogo_con_indice
+
+    w = WizardFornitore(radice, {}, pdf=crea_catalogo_con_indice(tmp_path / "con_indice.pdf"))
+    w.withdraw()
+    try:
+        # la pagina 1 e' l'indice: il wizard passa da solo alla pagina consigliata e lo dice
+        _attendi(radice, lambda: w.modello is not None and w.modello.analisi.pagina == 2 and w._lavoro is None)
+        assert w.pagina == 2 and w.modello.campi == ["marca", "modello", "descrizione", "prezzo"]
+        assert "La pagina 1 sembra un indice" in w.lbl_stato.cget("text")
+        voci = w.menu_campione.cget("values")
+        assert voci[0] == "○ pag. 1 · indice o divisorio" and w.menu_campione.get().startswith("✔ pag. 2")
+        # la prossima tabella; e tornando all'indice a mano non si salta piu', si suggerisce
+        w._prossima_tabella()
+        _attendi(radice, lambda: w._lavoro is None and w.modello.analisi.pagina == 3)
+        w._scegli_pagina_campione(voci[0])
+        _attendi(radice, lambda: w._lavoro is None and w.modello.analisi.pagina == 1)
+        assert w.pagina == 1 and "Prova la pagina 2" in w.lbl_stato.cget("text")
+    finally:
+        w.chiudi()
+
+
 def test_wizard_con_pdf_non_valido_mostra_l_errore(radice, tmp_path, monkeypatch):
     from tkinter import messagebox
 
