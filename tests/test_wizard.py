@@ -270,6 +270,34 @@ def test_due_colonne_prezzo_si_correggono_con_altro_prezzo(prezzi):
     assert m.etichette[3] == "Dealer" and m.errori() == []
 
 
+@pytest.fixture
+def sezioni(tmp_path):
+    from tests.sintetico_generico import crea_listino_sezioni
+
+    pdf = crea_listino_sezioni(tmp_path / "sezioni.pdf")
+    return ModelloWizard(analizza_pdf(str(pdf), 1)), pdf
+
+
+def test_colonne_senza_etichetta_sotto_il_titolo_della_sezione(sezioni):
+    # come il listino Compumania: sopra tipo, marca e descrizione c'e' solo il titolo della sezione, e la
+    # descrizione usciva «HD esterno Western Digital My Passport...»
+    from tests.sintetico_generico import ATTESI_SEZIONI
+
+    m, pdf = sezioni
+    assert m.campi == ["codice", "testo_generico", "testo_generico", "descrizione", "prezzo"]
+    assert [c.da_intestazione for c in m.analisi.colonne] == [True, False, False, False, True]
+    m.nome = "ACME"
+    assert m.errori() == []
+    p = m.profilo()
+    valida_schema({"versione_schema": 2, "fornitori": {"acme": p}})
+    # il titolo cambia a ogni sezione: salvato come intestazione, la sua sezione restava senza categoria
+    assert p["colonne"][1]["intestazioni"] == []
+    r = estrai_listino(pdf, p)
+    assert [(x.codice, x.altri["testo_1"], x.altri["testo_2"], x.descrizione, x.prezzo, x.categoria)
+            for x in r.articoli] == ATTESI_SEZIONI
+    assert not any(x.tutte_le_anomalie() for x in r.articoli)
+
+
 def test_il_nome_segue_il_ruolo_ma_non_cancella_quello_scelto(colore):
     m, _ = colore
     m.imposta_campo(2, "ignora")

@@ -163,7 +163,9 @@ Nella finestra principale: **Configura nuovo fornitore…**
    tabella e lo scrive in basso (con ◀ si torna indietro). La pre-analisi, eseguita in un processo separato,
    trova la riga d'intestazione e le colonne e le evidenzia sulla pagina, un colore per campo. Riconosce le
    intestazioni per sinonimi: «SKU», «Part Number», «Cod. art.» valgono come Codice. Se l'intestazione manca,
-   ricostruisce le colonne dalla posizione del testo, con i prezzi allineati a destra trattati a parte.
+   ricostruisce le colonne dalla posizione del testo, con i prezzi allineati a destra trattati a parte. Trova
+   anche le colonne che l'intestazione non nomina: nei listini esportati da Excel sopra tipo, marca e
+   descrizione c'è spesso un'etichetta sola, il titolo della sezione. Compaiono come «Colonna N».
 2. Per ogni colonna il menu propone un campo, dedotto da intestazione e contenuto: Modello, Codice, EAN,
    Descrizione, Prezzo, *Modello + Codice + EAN impilati* nella stessa colonna (come nel listino JBL),
    *Testo* per una colonna in più, *Marca* per la colonna sopra cui l'intestazione di ogni tabella scrive la

@@ -139,6 +139,57 @@ def colonne_senza_intestazione(spans: list[Span], metr: Metriche, larghezza: flo
     return [(x0, min(x1, colonne[i + 1][0] - 1) if i + 1 < len(colonne) else x1) for i, (x0, x1) in enumerate(colonne)]
 
 
+def colonne_interne(colonne: list[ColonnaFisica], spans: list[Span], tol: float,
+                    corpo: float) -> list[tuple[int, float, float]]:
+    """Colonne senza etichetta dentro una colonna d'intestazione: (indice della colonna, inizio, fine).
+
+    In un listino esportato da Excel l'intestazione nomina solo alcune colonne: nel Compumania sopra tipo
+    («Computer»), marca («Compumania») e descrizione c'e' un'etichetta sola, il titolo della sezione
+    («Personal computer»), e la descrizione usciva «Computer Compumania Core i3-3240...». Una colonna
+    interna comincia alla stessa x (entro 2 pt) in almeno QUOTA_INTERNA delle righe della colonna, almeno
+    due corpi dopo il suo inizio, e quasi nessuna riga ha un testo che la attraversa. Le parti di una
+    descrizione in stili diversi («Dimensioni BAP:» + «315x315») cominciano ovunque e non contano.
+    """
+    per: dict[int, list[Span]] = {}
+    for s in spans:
+        n = assegna_colonna(s, colonne, 6.0)
+        if n is not None:
+            per.setdefault(n, []).append(s)
+    trovate: list[tuple[int, float, float]] = []
+    for n, membri in sorted(per.items()):
+        righe = [sorted(r.spans, key=lambda s: s.x0) for r in raggruppa_righe(membri, tol)]
+        if len(righe) < MINIMO_RIGHE_INTERNA:
+            continue
+        inizi = []
+        for x in sorted({round(s.x0) for r in righe for s in r[1:]}):
+            if x - colonne[n].x < 2 * corpo or any(abs(x - y) <= 2 for y in inizi):
+                continue
+            con = sum(1 for r in righe if any(abs(s.x0 - x) <= 2 for s in r[1:]))
+            attraversano = sum(1 for r in righe if any(s.x0 < x - 2 and s.x1 > x + 1 for s in r))
+            if con >= QUOTA_INTERNA * len(righe) and attraversano <= QUOTA_ATTRAVERSATA * len(righe):
+                inizi.append(x)
+        for k, x in enumerate(inizi):
+            dopo = inizi[k + 1] - 2 if k + 1 < len(inizi) else float("inf")
+            fine = max(s.x1 for r in righe for s in r if x - 2 <= s.x0 < dopo)
+            trovate.append((n, float(x), min(fine, dopo + 1)))
+    return trovate
+
+
+def _con_interne(colonne: list[ColonnaFisica], riferimento: list[ColonnaFisica],
+                 interne: list[tuple[int, float, float]]) -> list[ColonnaFisica]:
+    """Le colonne di una pagina con le colonne interne trovate su quella di riferimento, spostate come la
+    colonna che le contiene. L'etichetta della colonna non va oltre la prima interna: un titolo lungo
+    («Consumabile Carta, cartuccia, nastro, toner, tamburo») copriva marca e descrizione."""
+    nuove: list[ColonnaFisica] = []
+    for i, c in enumerate(colonne):
+        sue = [(x, fine) for n, x, fine in interne if n == i]
+        scarto = c.x - riferimento[i].x
+        x1 = c.x1 if c.x1 is None or not sue else min(c.x1, sue[0][0] + scarto - 1)
+        nuove.append(ColonnaFisica(c.x, c.indice, c.etichetta, x1))
+        nuove.extend(ColonnaFisica(x + scarto, None, "", fine + scarto) for x, fine in sue)
+    return nuove
+
+
 def proponi_campo(testi: list[str]) -> str:
     """Campo piu' probabile per una colonna, dal suo contenuto."""
     testi = [t.strip() for t in testi if t.strip()]
@@ -216,6 +267,10 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
             if prima is not None and [c.indice for c in prima.colonne] == struttura:
                 colonne_di[n] = allinea_al_contenuto(prima.colonne, corpo)
         fisiche = colonne_di[pagina]
+        interne = colonne_interne(fisiche, corpi[pagina], tol, metr.corpo)
+        if interne:
+            colonne_di = {n: _con_interne(cols, fisiche, interne) for n, cols in colonne_di.items()}
+            fisiche = colonne_di[pagina]
         partenze = [(c.x, c.etichetta, generico["colonne"][c.indice]["campo"] if c.indice is not None else None)
                     for c in fisiche]
     else:
@@ -254,12 +309,13 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
     # etichette su due righe («Prezzo al» / «Pubblico»): la seconda riga va all'etichetta con cui si
     # sovrappone di piu', come il testo alle colonne. Serve solo al nome proposto della colonna
     complete = [c.etichetta for c in fisiche]
-    if intest is not None and len(intest.colonne) == len(fisiche):
+    con_etichetta = [i for i, c in enumerate(fisiche) if c.etichetta]  # senza le colonne interne
+    if intest is not None and len(intest.colonne) == len(con_etichetta):
         seguito = sorted((s for s in pagine[pagina][0] if intest.y0 + tol < s.y0 <= intest.y1), key=lambda s: (s.y0, s.x0))
         for s in seguito:
             n = assegna_colonna(s, intest.colonne, generico["spaziatura"]["tolleranza_colonna_pt"])
             if n is not None:
-                complete[n] = f"{complete[n]} {s.testo.strip()}"
+                complete[con_etichetta[n]] = f"{complete[con_etichetta[n]]} {s.testo.strip()}"
     colonne = []
     piu_piena = max((len(t) for t in testi), default=0)
     # ruoli gia' dati da un'etichetta riconosciuta: servono a riconoscere una colonna in piu' (sotto)
@@ -279,19 +335,25 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
             # un'etichetta che non e' il nome di un campo («Colour») sopra testo allineato, quando quel ruolo
             # l'ha gia' un'altra colonna, o l'articolo ha gia' il suo codice: e' una colonna in piu'
             campo = TESTO_GENERICO
-        if campo == "ignora" and campo_intestazione is None and intest is not None and len(
+        variabile = campo_intestazione is None and intest is not None and len(
             {cols[i].etichetta for cols in colonne_di.values() if len(cols) == len(partenze)}
-        ) >= 2:
+        ) >= 2
+        if campo == "ignora" and variabile:
             # sopra testo da ignorare, un'etichetta che cambia da una tabella all'altra e non e' il nome di
             # un campo: la marca (catalogo Etabeta: «VISSONIC», «MOGAMI», «Konig & Meyer»)
             campo = MARCA
+        # un'etichetta che cambia fra le tabelle e' un titolo, non il nome della colonna: non si salva come
+        # intestazione, o sulla sua tabella la categoria restava vuota (Compumania: «Personal computer»
+        # sopra il tipo); una colonna interna non ha etichetta
+        da_intestazione = intest is not None and bool(etichetta) and not variabile
+        etichetta = etichetta or f"Colonna {i + 1}"
         x1 = xs[i + 1] - 1 if i + 1 < len(xs) else larghezza
         fine = max([s.x1 for s in spans_col[i]] + ([fisiche[i].x1] if fisiche[i].x1 else []), default=None)
         if fine is not None:
             # non oltre l'inizio della colonna dopo: sulla pagina 13 dell'Etabeta un testo a tutta larghezza portava
             # la fine della descrizione sopra i prezzi, e sulle pagine senza intestazione i prezzi andavano persi
             fine = min(fine, x1)
-        colonne.append(ColonnaRilevata(x, x1, etichetta, campo, esempi[i], intest is not None, len(testi[i]), fine,
+        colonne.append(ColonnaRilevata(x, x1, etichetta, campo, esempi[i], da_intestazione, len(testi[i]), fine,
                                        complete[i]))
     # piu' colonne di prezzi (Midiware: Listino, Dealer, Premium, Street): il prezzo dell'articolo e' uno, quello
     # che l'etichetta chiama prezzo o il primo; gli altri sono prezzi in piu'. Quattro «Prezzo» non si salvano, e
@@ -325,6 +387,10 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
 
 QUOTA_ALLINEAMENTO = 0.5
 QUOTA_COLONNA_VUOTA = 0.1
+# colonna interna (v. colonne_interne): righe che vi cominciano, righe che la attraversano, righe per giudicare
+QUOTA_INTERNA = 0.6
+QUOTA_ATTRAVERSATA = 0.05
+MINIMO_RIGHE_INTERNA = 5
 # una pagina con meno di questa quota dei prezzi di una pagina tipica del campione non e' una tabella
 QUOTA_PAGINA_DEBOLE = 0.25
 

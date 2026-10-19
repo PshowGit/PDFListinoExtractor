@@ -275,7 +275,13 @@ def risolvi_colonne(intestazione: Intestazione | None, profilo: dict, larghezza:
             fine = col.get("x_fine_relativo")
             etichetta = f"{col['campo'].capitalize()}, x≈{x:.0f}"  # nelle note: quale colonna ha fallito
             colonne.append(ColonnaFisica(x, i, etichetta, fine * larghezza if fine is not None else None))
-    return sorted(colonne, key=lambda c: c.x)
+    colonne.sort(key=lambda c: c.x)
+    # un'etichetta non va oltre l'inizio della colonna dopo: un titolo di sezione lungo copre le colonne
+    # senza etichetta che lo seguono (Compumania: «Schede Video ADD-ON, sk TV, montaggio digitale» sopra
+    # tipo, marca e descrizione), e con la sovrapposizione si prendeva la marca (tests/sintetico_generico.py)
+    return [ColonnaFisica(c.x, c.indice, c.etichetta, dopo.x - 1)
+            if dopo is not None and c.x1 is not None and c.x1 > dopo.x - 1 > c.x else c
+            for c, dopo in itertools.zip_longest(colonne, colonne[1:])]
 
 
 def allinea_al_contenuto(colonne: list[ColonnaFisica], spans: list[Span], tolleranza: float = 6.0,

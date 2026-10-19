@@ -148,6 +148,54 @@ ATTESI_COLONNE = {
 }
 
 
+# --- sezioni con colonne senza etichetta ------------------------------------------------------------
+# Come il listino Compumania, esportato da Excel: un'intestazione per sezione, «Codice | <titolo> | Prezzo»,
+# e sotto il titolo tre colonne che nessuna etichetta nomina, tipo, marca e descrizione. Il titolo cambia a
+# ogni sezione ed e' la categoria. Il primo della seconda pagina, da cui si leggono le colonne della pagina,
+# copre marca e descrizione, e sotto c'e' una marca piu' lunga di quelle della prima pagina.
+X_TIPO, X_MARCA, X_DESCR = 110, 200, 280
+SEZIONI = [
+    [("Stampanti", [("650010010", "Multifunzione", "Brother", "MFC-J625DW inkjet a colori", "115.08"),
+                    ("380010092", "Multifunzione", "Brother", "MFC-J6510DW formato A3", "198.77"),
+                    ("380010095", "Laser", "Kyocera", "FS-1041 bianco e nero 20 ppm", "89.00")]),
+     ("Monitor", [("200070116", "Monitor", "Acer", "V226HQL 21.5 pollici Full HD", "95.20"),
+                  ("200070117", "Monitor", "Asus", "VS247H 23.6 pollici con HDMI", "118.60")])],
+    [("Hard disk esterni, NAS, unita' removibili e accessori",
+      [("470140023", "HD esterno", "Western Digital", "My Passport 500Gb USB 3.0", "53.11"),
+       ("470140030", "HD esterno", "Western Digital", "Elements 3TB USB 3.0 Black", "107.79"),
+       ("470140041", "HD interno", "Seagate", "Barracuda 1TB SATA 7200 rpm", "49.90")]),
+     ("Consumabili", [("610070168", "Cartuccia", "Epson", "T0711 nero per Stylus D78", "12.40"),
+                      ("610070169", "Toner", "HP", "CE285A nero per LaserJet P1102", "58.30")])],
+]
+# righe attese: codice, tipo, marca, descrizione, prezzo, categoria
+ATTESI_SEZIONI = [(a[0], a[1], a[2], a[3], Decimal(a[4]), titolo) for pagina in SEZIONI for titolo, righe in pagina
+                  for a in righe]
+
+
+def crea_listino_sezioni(percorso: str | Path) -> Path:
+    percorso = Path(percorso)
+    doc = pymupdf.open()
+    for n, sezioni in enumerate(SEZIONI, 1):
+        page = doc.new_page(width=595, height=842)
+        _scrivi(page, 200, 40, "Listino Prezzi ACME Srl", 12)
+        y = 90.0
+        for titolo, righe in sezioni:
+            _scrivi(page, 40, y, "Codice")
+            _scrivi(page, X_TIPO, y, titolo)
+            _a_destra(page, X_PREZZO_DX, y, "Prezzo")
+            y += INTERLINEA + 2
+            for codice, tipo, marca, descrizione, prezzo in righe:
+                for x, testo in ((40, codice), (X_TIPO, tipo), (X_MARCA, marca), (X_DESCR, descrizione)):
+                    _scrivi(page, x, y, testo)
+                _a_destra(page, X_PREZZO_DX, y, prezzo)
+                y += INTERLINEA
+            y += 3 * INTERLINEA
+        _scrivi(page, 520, 805, f"Pagina {n} / {len(SEZIONI)}", 7)
+    doc.save(percorso)
+    doc.close()
+    return percorso
+
+
 def crea_listino_colonne(percorso: str | Path, variante: str) -> Path:
     percorso = Path(percorso)
     colonne = VARIANTI[variante]
