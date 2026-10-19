@@ -54,7 +54,11 @@ class PreviewTable(ctk.CTkFrame):
         self._ordine: list[str] = []
         self._filtro: str | None = TUTTE
         self._verso: dict[str, bool] = {}
+        self._ordinata: tuple[str, bool] | None = None  # colonna dell'ultimo ordinamento e se discendente
         self._editor: tk.Widget | None = None
+        self._in_modifica: tuple[str, int] | None = None  # riga e colonna dell'editor aperto
+        self.attiva = 0  # colonna (fra quelle del documento) che Invio e F2 correggono
+        self._finestra_descrizione: ctk.CTkToplevel | None = None
         self._prossimo_id = 0
         self.colonne: list[ColonnaUscita] = (
             colonne_uscita(normalizza(regole)) if regole.get("colonne") else list(COLONNE_STANDARD)
@@ -76,6 +80,17 @@ class PreviewTable(ctk.CTkFrame):
         self.tree.bind("<Double-1>", self._doppio_clic)
         self.tree.bind("<Delete>", lambda e: self.elimina_selezionati(chiedi_conferma=True))
         self.tree.bind("<<TreeviewSelect>>", self._selezione)
+        # tastiera: correggere senza mouse; ogni gestore ferma il comportamento predefinito del Treeview
+        for tasto in ("<Return>", "<KP_Enter>", "<F2>"):
+            self.tree.bind(tasto, lambda e: self._ferma(self.modifica_attiva()))
+        self.tree.bind("<Left>", lambda e: self._ferma(self.sposta_colonna(-1)))
+        self.tree.bind("<Right>", lambda e: self._ferma(self.sposta_colonna(1)))
+        self.tree.bind("<F8>", lambda e: self._ferma(self.vai_da_verificare(1)))
+        self.tree.bind("<Shift-F8>", lambda e: self._ferma(self.vai_da_verificare(-1)))
+
+    @staticmethod
+    def _ferma(_esito=None) -> str:
+        return "break"
 
     def _stile(self):
         stile = ttk.Style(self)
@@ -98,14 +113,25 @@ class PreviewTable(ctk.CTkFrame):
     def _configura_colonne(self) -> None:
         self.tree.configure(columns=[c.chiave for c in self._tutte()])
         self._verso.clear()
+        self._ordinata = None
+        self.attiva = min(self.attiva, len(self.colonne) - 1) if self.colonne else 0
         for c in self._tutte():
-            self.tree.heading(c.chiave, text=c.etichetta, command=lambda k=c.chiave: self.ordina(k))
+            self.tree.heading(c.chiave, command=lambda k=c.chiave: self.ordina(k))
             self.tree.column(
                 c.chiave,
                 width=LARGHEZZE[c.ruolo],
                 anchor="e" if c.ruolo in ("prezzo", "pagina") else "w",
                 stretch=c.ruolo in ("descrizione", "note"),
             )
+        self._intestazioni()
+
+    def _intestazioni(self) -> None:
+        """Titoli delle colonne: «▸» sulla colonna attiva, la freccia sull'ultima ordinata."""
+        for n, c in enumerate(self._tutte()):
+            testo = ("▸ " if n == self.attiva and n < len(self.colonne) else "") + c.etichetta
+            if self._ordinata and self._ordinata[0] == c.chiave:
+                testo += " ▼" if self._ordinata[1] else " ▲"
+            self.tree.heading(c.chiave, text=testo)
 
     # --- dati -------------------------------------------------------------------------------
 
@@ -177,6 +203,8 @@ class PreviewTable(ctk.CTkFrame):
 
     def _ridisegna(self) -> None:
         selezione = set(self.tree.selection())
+        attuale = self.tree.focus()
+        prima = list(self.tree.get_children())
         self.tree.delete(*self.tree.get_children())
         for iid in self._ordine:
             a = self._articoli[iid]
@@ -187,6 +215,27 @@ class PreviewTable(ctk.CTkFrame):
         rimaste = [i for i in selezione if self.tree.exists(i)]
         if rimaste:
             self.tree.selection_set(rimaste)
+            self.tree.focus(attuale if self.tree.exists(attuale) else rimaste[0])
+        elif attuale in prima:
+            # la riga selezionata non c'e' piu' (corretta col filtro attivo, o eliminata): si passa a quella che
+            # ne prende il posto, o all'ultima, invece di perdere il punto in cui si stava lavorando
+            dopo = [i for i in prima[prima.index(attuale) + 1:] if self.tree.exists(i)]
+            altre = dopo or [i for i in reversed(prima[:prima.index(attuale)]) if self.tree.exists(i)]
+            if altre:
+                self.seleziona(altre[0])
+
+    def seleziona(self, iid: str) -> None:
+        """Seleziona una riga, ci mette il cursore della tastiera e la fa vedere."""
+        self.tree.selection_set(iid)
+        self.tree.focus(iid)
+        self.tree.see(iid)
+
+    def _riga_corrente(self) -> str | None:
+        corrente = self.tree.focus()
+        if corrente and self.tree.exists(corrente):
+            return corrente
+        sel = self.tree.selection()
+        return sel[0] if sel else None
 
     def _dopo_modifica(self) -> None:
         valida(self.articoli(), self.regole)  # i duplicati dipendono da tutte le righe
@@ -202,9 +251,8 @@ class PreviewTable(ctk.CTkFrame):
         if col.ruolo == "prezzo" and discendente:  # tieni comunque i mancanti in fondo
             self._ordine.sort(key=lambda i: self._articoli[i].prezzo is None)
         self._verso[campo] = not discendente
-        for c in self._tutte():
-            freccia = (" ▼" if discendente else " ▲") if c.chiave == campo else ""
-            self.tree.heading(c.chiave, text=c.etichetta + freccia)
+        self._ordinata = (campo, discendente)
+        self._intestazioni()
         self._ridisegna()
 
     def elimina_selezionati(self, chiedi_conferma: bool = False) -> int:
@@ -254,16 +302,63 @@ class PreviewTable(ctk.CTkFrame):
         indice = int(colonna[1:]) - 1
         if indice >= len(self.colonne):  # pagina e anomalie non si modificano
             return
-        col = self.colonne[indice]
-        campo = col.chiave
-        if col.ruolo == "descrizione":
+        self.modifica(iid, indice)
+
+    # --- tastiera ---------------------------------------------------------------------------
+
+    def sposta_colonna(self, verso: int) -> None:
+        """← e →: la colonna che Invio e F2 correggono (solo quelle del documento)."""
+        if self.colonne:
+            self.attiva = max(0, min(len(self.colonne) - 1, self.attiva + verso))
+            self._intestazioni()
+            self._mostra_colonna(self.attiva)
+
+    def modifica_attiva(self) -> None:
+        """Invio e F2: corregge la colonna attiva della riga corrente."""
+        iid = self._riga_corrente()
+        if iid is not None and self.colonne:
+            self.modifica(iid, self.attiva)
+
+    def modifica(self, iid: str, indice: int) -> None:
+        """Apre la correzione di una cella: in una finestra la descrizione, sul posto le altre."""
+        self.attiva = indice
+        self._intestazioni()
+        self.seleziona(iid)
+        if self.colonne[indice].ruolo == "descrizione":
             self._modifica_descrizione(iid)
         else:
-            self._modifica_in_linea(iid, campo, colonna)
+            self._modifica_in_linea(iid, indice)
 
-    def _modifica_in_linea(self, iid: str, campo: str, colonna: str):
+    def vai_da_verificare(self, verso: int = 1) -> str | None:
+        """F8 e Maiusc+F8: la prossima (o la precedente) riga mostrata con un'anomalia, ricominciando dall'inizio."""
+        righe = list(self.tree.get_children())
+        if not righe:
+            return None
+        corrente = self._riga_corrente()
+        partenza = righe.index(corrente) if corrente in righe else (-1 if verso > 0 else 0)
+        for passo in range(1, len(righe) + 1):
+            iid = righe[(partenza + verso * passo) % len(righe)]
+            if self._articoli[iid].tutte_le_anomalie():
+                self.seleziona(iid)
+                return iid
+        return None
+
+    def _mostra_colonna(self, indice: int) -> None:
+        """Scorre la tabella in orizzontale finche' la colonna si vede."""
+        larghezze = [self.tree.column(c.chiave, "width") for c in self._tutte()]
+        totale = sum(larghezze) or 1
+        inizio, fine = sum(larghezze[:indice]) / totale, sum(larghezze[:indice + 1]) / totale
+        da, a = self.tree.xview()
+        if inizio < da or fine > a:
+            self.tree.xview_moveto(max(0.0, inizio if inizio < da else fine - (a - da)))
+
+    def _modifica_in_linea(self, iid: str, indice: int):
         self._chiudi_editor()
-        x, y, w, h = self.tree.bbox(iid, colonna)
+        campo = self.colonne[indice].chiave
+        self._mostra_colonna(indice)
+        self.tree.update_idletasks()
+        # una riga fuori vista (o la tabella non ancora disegnata) non ha riquadro: l'editor va in alto
+        x, y, w, h = self.tree.bbox(iid, f"#{indice + 1}") or (0, 0, 120, 24)
         a = self._articoli[iid]
         prezzo = self._colonna(campo).ruolo == "prezzo"
         iniziale = formatta_prezzo(a.prezzo) if prezzo and a.prezzo is not None else (
@@ -275,24 +370,56 @@ class PreviewTable(ctk.CTkFrame):
         entry.place(x=x, y=y, width=max(w, 120), height=h)
         entry.focus_set()
         self._editor = entry
-
-        def conferma(_e=None):
-            valore = entry.get()
-            if not self.modifica_campo(iid, campo, valore):
-                messagebox.showerror("Prezzo non valido", f"«{valore}» non e' un prezzo riconoscibile.", parent=self)
-                entry.focus_set()
-                return
-            self._chiudi_editor()
-
-        entry.bind("<Return>", conferma)
-        entry.bind("<KP_Enter>", conferma)
-        entry.bind("<Escape>", lambda e: self._chiudi_editor())
+        self._in_modifica = (iid, indice)
+        # Invio conferma e scende di riga (come in Excel); Tab e Maiusc+Tab confermano e aprono la cella accanto
+        entry.bind("<Return>", lambda e: self._ferma(self.conferma_editor("giu")))
+        entry.bind("<KP_Enter>", lambda e: self._ferma(self.conferma_editor("giu")))
+        entry.bind("<Tab>", lambda e: self._ferma(self.conferma_editor("destra")))
+        entry.bind("<Shift-Tab>", lambda e: self._ferma(self.conferma_editor("sinistra")))
+        entry.bind("<Escape>", lambda e: self._ferma(self.annulla_editor()))
         entry.bind("<FocusOut>", lambda e: self._chiudi_editor())
+
+    def conferma_editor(self, dopo: str | None = None) -> bool:
+        """Applica il valore dell'editor; poi `dopo` = "giu", "destra" o "sinistra" dice dove proseguire.
+
+        Se la riga sparisce col filtro attivo (l'anomalia era quella cercata), si prosegue dalla riga che ne ha
+        preso il posto. Un prezzo non valido lascia l'editor aperto.
+        """
+        if self._editor is None or self._in_modifica is None:
+            return False
+        iid, indice = self._in_modifica
+        valore = self._editor.get()
+        self._editor.unbind("<FocusOut>")  # il messaggio d'errore prende il focus: l'editor deve restare
+        if not self.modifica_campo(iid, self.colonne[indice].chiave, valore):
+            messagebox.showerror("Prezzo non valido", f"«{valore}» non e' un prezzo riconoscibile.", parent=self)
+            if self._editor is not None:
+                self._editor.bind("<FocusOut>", lambda e: self._chiudi_editor())
+                self._editor.focus_set()
+            return False
+        self._chiudi_editor()
+        rimasta = self.tree.exists(iid)
+        corrente = iid if rimasta else self._riga_corrente()
+        if dopo == "giu" and rimasta:
+            righe = list(self.tree.get_children())
+            if righe.index(iid) + 1 < len(righe):
+                self.seleziona(righe[righe.index(iid) + 1])
+        elif dopo in ("destra", "sinistra") and corrente is not None:
+            prossima = indice + (1 if dopo == "destra" else -1)
+            if 0 <= prossima < len(self.colonne):
+                self.modifica(corrente, prossima)
+                return True
+        self.tree.focus_set()
+        return True
+
+    def annulla_editor(self) -> None:
+        self._chiudi_editor()
+        self.tree.focus_set()
 
     def _chiudi_editor(self):
         if self._editor is not None:
             self._editor.destroy()
             self._editor = None
+            self._in_modifica = None
 
     def _modifica_descrizione(self, iid: str):
         a = self._articoli[iid]
@@ -306,12 +433,22 @@ class PreviewTable(ctk.CTkFrame):
         barra = ctk.CTkFrame(fin, fg_color="transparent")
         barra.pack(fill="x", padx=10, pady=(0, 10))
 
+        def chiudi():
+            fin.destroy()
+            self.tree.focus_set()  # la tastiera torna sulla tabella
+
         def salva():
             self.modifica_campo(iid, "descrizione", " ".join(box.get("1.0", "end").split()))
-            fin.destroy()
+            chiudi()
 
-        ctk.CTkButton(barra, text="Salva", command=salva, width=100).pack(side="right")
-        ctk.CTkButton(barra, text="Annulla", command=fin.destroy, width=100, fg_color="gray").pack(
+        ctk.CTkButton(barra, text="Salva (Ctrl+Invio)", command=salva, width=140).pack(side="right")
+        ctk.CTkButton(barra, text="Annulla (Esc)", command=chiudi, width=110, fg_color="gray").pack(
             side="right", padx=8
         )
+        # Invio nella casella va a capo: per salvare da tastiera serve Ctrl+Invio
+        fin.bind("<Control-Return>", lambda e: self._ferma(salva()))
+        fin.bind("<Escape>", lambda e: self._ferma(chiudi()))
+        fin.protocol("WM_DELETE_WINDOW", chiudi)
         fin.after(100, fin.grab_set)
+        fin.after(150, box.focus_set)
+        self._finestra_descrizione = fin

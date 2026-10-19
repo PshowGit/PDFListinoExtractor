@@ -18,7 +18,7 @@ Applicazione desktop Windows (Python 3.12, customtkinter) che estrae gli articol
 
 ```powershell
 uv run python main.py                                   # avvio dal sorgente
-uv run pytest -q                                        # suite completa (241 test, 1 saltato senza Tesseract)
+uv run pytest -q                                        # suite completa (249 test, 1 saltato senza Tesseract)
 uv run pytest tests/test_pdf_extraction.py -v           # un file
 uv run pytest tests/test_gui.py::test_ordinamento_per_prezzo_con_mancanti_in_fondo -v   # un test
 uv run ruff check .                                     # lint (config in pyproject.toml)
@@ -90,7 +90,7 @@ Scelte non ovvie, ognuna motivata da una misura o da un difetto reale:
 
 ## Test
 
-`tests/sintetico.py` (impaginazione JBL), `tests/sintetico_generico.py` (layout opposto; `crea_listino_colonne` con le varianti a colonne dinamiche «tre» e «colore», attese in `ATTESI_COLONNE` come righe dell'Excel) e `tests/sintetico_catalogo.py` (catalogo Etabeta, con e senza griglia) generano PDF con i risultati attesi in `ATTESI`. Per un caso nuovo si aggiungono lì sia il contenuto della pagina sia il risultato atteso. Il font `helv` dei PDF sintetici non ha il «€»: scrivere «EUR». Per i test con Tk non serve un display virtuale su Windows. Una suite verde però non basta: il blocco dell'interfaccia, il problema del BOM, l'intestazione che assorbiva i titoli, il «Modello mancante» su ogni riga e tutti i difetti del catalogo Etabeta sono emersi solo provando l'applicazione vera o un PDF vero (`tools/prova_gui.py`, `tools/prova_wizard.py`, `--collaudo`, `--collaudo-wizard`, `tools/collaudo_installer.ps1`).
+`tests/sintetico.py` (impaginazione JBL), `tests/sintetico_generico.py` (layout opposto; `crea_listino_colonne` con le varianti a colonne dinamiche «tre» e «colore», attese in `ATTESI_COLONNE` come righe dell'Excel) e `tests/sintetico_catalogo.py` (catalogo Etabeta, con e senza griglia) generano PDF con i risultati attesi in `ATTESI`. Per un caso nuovo si aggiungono lì sia il contenuto della pagina sia il risultato atteso. Il font `helv` dei PDF sintetici non ha il «€»: scrivere «EUR». Per i test con Tk non serve un display virtuale su Windows. Le azioni da tastiera della tabella (`sposta_colonna`, `modifica_attiva`, `conferma_editor`, `vai_da_verificare`) sono metodi: i test le chiamano direttamente, perché con la finestra nascosta Tk non consegna i tasti; i tasti veri si provano sulla finestra visibile con `event_generate`. Una suite verde però non basta: il blocco dell'interfaccia, il problema del BOM, l'intestazione che assorbiva i titoli, il «Modello mancante» su ogni riga e tutti i difetti del catalogo Etabeta sono emersi solo provando l'applicazione vera o un PDF vero (`tools/prova_gui.py`, `tools/prova_wizard.py`, `--collaudo`, `--collaudo-wizard`, `tools/collaudo_installer.ps1`).
 
 ## Licenze
 

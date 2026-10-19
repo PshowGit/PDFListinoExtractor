@@ -307,8 +307,10 @@ class FinestraPrincipale(ctk.CTk):
         self.dettaglio.grid(row=2, column=0, sticky="ew", padx=6, pady=(4, 8))
         self.dettaglio.insert(
             "1.0",
-            "Doppio clic su una cella per correggerla (la descrizione si apre in una finestra). "
-            "Canc elimina le righe selezionate. Clic sull'intestazione per ordinare.",
+            "Doppio clic o Invio (F2) per correggere la cella; ← → scelgono la colonna (segnata con ▸). "
+            "Nella correzione Invio conferma e scende, Tab passa alla cella accanto, Esc annulla; la descrizione "
+            "si apre in una finestra (Ctrl+Invio salva). F8 va alla prossima riga da verificare, Maiusc+F8 alla "
+            "precedente. Canc elimina le righe selezionate. Clic sull'intestazione per ordinare.",
         )
         self.dettaglio.configure(state="disabled")
 
@@ -346,7 +348,9 @@ class FinestraPrincipale(ctk.CTk):
                                if c.ruolo not in ("descrizione", "prezzo"))
             prezzo = ""
             if any(c.ruolo == "prezzo" for c in colonne):
-                prezzo = f"{formatta_prezzo(a.prezzo) or a.prezzo_testo or 'senza prezzo'} €   ·   "
+                # l'euro solo dopo un prezzo vero, non dopo «senza prezzo» o un testo non riconosciuto
+                prezzo = (f"{formatta_prezzo(a.prezzo)} €" if a.prezzo is not None
+                          else a.prezzo_testo or "senza prezzo") + "   ·   "
             righe = [f"{dati}   ·   {prezzo}pag. {a.pagina}   ·   {a.categoria}"]
             if any(c.ruolo == "descrizione" for c in colonne):
                 righe.append(a.descrizione)

@@ -132,6 +132,11 @@ uv run python main.py
    «Marca mancante»…), ognuno col numero di righe; i numeri si aggiornano a ogni correzione. Si può:
    - ordinare cliccando sull'intestazione di una colonna;
    - correggere con un doppio clic su una cella (la descrizione si apre in una finestra);
+   - correggere da tastiera: `←` `→` scelgono la colonna (segnata con ▸ nell'intestazione), `Invio` o `F2`
+     apre la cella; nella correzione `Invio` conferma e scende alla riga dopo, `Tab` / `Maiusc+Tab` passano
+     alla cella accanto, `Esc` annulla; nella finestra della descrizione `Ctrl+Invio` salva;
+   - andare alla prossima riga da verificare con `F8` (`Maiusc+F8` alla precedente). Con il filtro attivo,
+     una riga corretta sparisce e la selezione passa a quella dopo;
    - eliminare le righe selezionate (tasto `Canc` o pulsante);
    - aprire la pagina di origine con l'articolo evidenziato (**Mostra pagina PDF**).
 4. **Esporta in Excel**: si sceglie nome e cartella, con conferma prima di sovrascrivere. Viene esportato

@@ -65,6 +65,108 @@ def test_filtro_per_tipo_di_anomalia(tabella):
     assert dict(tabella.tipi_anomalia()) == tipi
 
 
+# --- tastiera ------------------------------------------------------------------------------------
+
+def _riga(tabella, codice):
+    return next(i for i in tabella.tree.get_children() if tabella.articolo(i).codice == codice)
+
+
+def test_tasti_collegati(tabella):
+    for tasto in ("<Return>", "<F2>", "<Left>", "<Right>", "<F8>", "<Shift-F8>", "<Delete>"):
+        assert tabella.tree.bind(tasto), tasto
+
+
+def test_frecce_cambiano_la_colonna_attiva(tabella):
+    assert tabella.attiva == 0 and tabella.tree.heading("modello", "text") == "▸ Modello"
+    tabella.sposta_colonna(1)
+    assert tabella.attiva == 1 and tabella.tree.heading("codice", "text") == "▸ Codice"
+    assert tabella.tree.heading("modello", "text") == "Modello"
+    tabella.sposta_colonna(-5)
+    assert tabella.attiva == 0
+    tabella.sposta_colonna(99)  # non oltre l'ultima colonna del documento: pagina e anomalie non si correggono
+    assert tabella.attiva == len(tabella.colonne) - 1
+    tabella.ordina("prezzo")  # la freccia dell'ordinamento convive col segno della colonna attiva
+    assert tabella.tree.heading("prezzo", "text") == "▸ Prezzo ▲"
+
+
+def test_invio_corregge_e_scende_di_riga(tabella):
+    righe = tabella.tree.get_children()
+    tabella.seleziona(righe[0])
+    tabella.sposta_colonna(1)  # Codice
+    tabella.modifica_attiva()
+    assert tabella._editor is not None and tabella._editor.get() == tabella.articolo(righe[0]).codice
+    tabella._editor.delete(0, "end")
+    tabella._editor.insert(0, "(NUOVO-1)")
+    assert tabella.conferma_editor("giu")
+    assert tabella.articolo(righe[0]).codice == "(NUOVO-1)"
+    assert tabella._editor is None and tabella.tree.focus() == righe[1] and tabella.tree.selection() == (righe[1],)
+
+
+def test_tab_apre_la_cella_accanto_ed_esc_annulla(tabella):
+    righe = tabella.tree.get_children()
+    tabella.modifica(righe[0], 1)  # Codice
+    prima = tabella.articolo(righe[0]).codice
+    assert tabella.conferma_editor("destra")
+    assert tabella.attiva == 2 and tabella._in_modifica == (righe[0], 2)  # EAN, stessa riga
+    tabella._editor.delete(0, "end")
+    tabella._editor.insert(0, "123")
+    tabella.annulla_editor()
+    assert tabella._editor is None and tabella.articolo(righe[0]).ean != "123"
+    assert tabella.articolo(righe[0]).codice == prima  # confermato senza cambiarlo
+    tabella.modifica(righe[0], 1)
+    assert tabella.conferma_editor("sinistra") and tabella._in_modifica == (righe[0], 0)
+    tabella.annulla_editor()
+
+
+def test_col_filtro_la_riga_corretta_lascia_il_posto_alla_successiva(tabella):
+    from gui.preview_table import DA_VERIFICARE
+
+    tabella.imposta_filtro(DA_VERIFICARE)
+    da_verificare = list(tabella.tree.get_children())
+    iid = _riga(tabella, "(SPK-003)")
+    dopo = da_verificare[da_verificare.index(iid) + 1]
+    tabella.modifica(iid, tabella.colonne.index(next(c for c in tabella.colonne if c.ruolo == "prezzo")))
+    tabella._editor.delete(0, "end")
+    tabella._editor.insert(0, "1.090,50")
+    assert tabella.conferma_editor("giu")
+    assert not tabella.tree.exists(iid)  # corretta: non e' piu' da verificare
+    assert tabella.tree.focus() == dopo and tabella.tree.selection() == (dopo,)  # non si scende di due
+
+
+def test_prezzo_non_valido_lascia_l_editor_aperto(tabella, monkeypatch):
+    from tkinter import messagebox
+
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: None)
+    iid = _riga(tabella, "(SPK-003)")
+    tabella.modifica(iid, next(n for n, c in enumerate(tabella.colonne) if c.ruolo == "prezzo"))
+    tabella._editor.delete(0, "end")
+    tabella._editor.insert(0, "boh")
+    assert not tabella.conferma_editor("giu")
+    assert tabella._editor is not None and tabella._in_modifica[0] == iid
+    tabella.annulla_editor()
+
+
+def test_f8_va_alle_righe_da_verificare(tabella):
+    righe = list(tabella.tree.get_children())
+    con = [i for i in righe if tabella.articolo(i).tutte_le_anomalie()]
+    assert len(con) >= 2
+    tabella.seleziona(righe[0] if righe[0] not in con else righe[righe.index(con[0]) + 1])
+    primo = tabella.vai_da_verificare(1)
+    assert primo in con and tabella.tree.selection() == (primo,)
+    secondo = tabella.vai_da_verificare(1)
+    assert secondo == con[(con.index(primo) + 1) % len(con)]
+    assert tabella.vai_da_verificare(-1) == primo
+    tabella.seleziona(con[-1])
+    assert tabella.vai_da_verificare(1) == con[0]  # ricomincia dall'inizio
+
+
+def test_eliminare_la_riga_selezionata_seleziona_la_successiva(tabella):
+    righe = list(tabella.tree.get_children())
+    tabella.seleziona(righe[2])
+    tabella.elimina_selezionati()
+    assert tabella.tree.selection() == (righe[3],)
+
+
 def test_correggere_il_prezzo_toglie_l_anomalia(tabella):
     iid = next(i for i in tabella.tree.get_children() if tabella.articolo(i).codice == "(SPK-003)")
     assert tabella.articolo(iid).tutte_le_anomalie()
@@ -318,7 +420,8 @@ def test_tabella_con_le_colonne_dell_estrazione(radice):
             Articolo("C-3", prezzo=Decimal("2.50"), pagina=2)]
     t.carica(arts, colonne)
     assert t.tree["columns"] == ("modello", "testo_1", "prezzo", "pagina", "note")
-    assert [t.tree.heading(c, "text") for c in ("modello", "testo_1", "prezzo")] == ["Articolo", "Colore", "Listino"]
+    # «▸» segna la colonna attiva per la tastiera (la prima)
+    assert [t.tree.heading(c, "text") for c in ("modello", "testo_1", "prezzo")] == ["▸ Articolo", "Colore", "Listino"]
     assert t.tree.item(t.tree.get_children()[0], "values")[:3] == ("B-2", "Rosso", "5,00")
     for _ in range(2):  # crescente e decrescente: il prezzo mancante resta in fondo
         t.ordina("prezzo")
@@ -352,7 +455,8 @@ def test_colonne_dinamiche_dal_pdf_all_excel(radice, tmp_path, variante):
 
     t = PreviewTable(radice, profilo)
     t.carica(ris.articoli, ris.colonne)
-    assert [t.tree.heading(c, "text") for c in t.tree["columns"]] == [*intestazioni, "Pag.", "Anomalie"]
+    titoli = [t.tree.heading(c, "text").removeprefix("▸ ") for c in t.tree["columns"]]  # «▸»: colonna attiva
+    assert titoli == [*intestazioni, "Pag.", "Anomalie"]
     assert not any(a.tutte_le_anomalie() for a in t.articoli())
 
     p = tmp_path / f"{variante}.xlsx"
@@ -415,6 +519,10 @@ def test_dettaglio_con_le_colonne_del_documento(radice, tmp_path, monkeypatch):
         testo = app.dettaglio.get("1.0", "end")
         assert "Articolo VMHM4I" in testo and "888,00 €" in testo and "Scheda input 4 canali HDMI" in testo
         assert "EAN" not in testo and "Codice" not in testo
+        senza = Articolo("VMX-1", pagina=22)
+        app._mostra_dettaglio(senza)
+        testo = app.dettaglio.get("1.0", "end")
+        assert "senza prezzo" in testo and "€" not in testo
     finally:
         app.destroy()
     import customtkinter as ctk
