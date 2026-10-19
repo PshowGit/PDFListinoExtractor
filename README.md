@@ -155,6 +155,11 @@ Il fornitore finisce in `%LOCALAPPDATA%\PDFListinoExtractor\supplier_rules.json`
 (si apre col Blocco note), viene scritto in modo atomico e validato con `config/supplier_rules.schema.json`;
 la versione precedente resta in una copia `.bak`. Gli aggiornamenti del programma non lo toccano.
 
+Accanto al menu «Fornitore», **Rinomina…** cambia il nome con cui compare il fornitore (le regole restano le
+stesse) e **Rimuovi** lo toglie dal file personale. Valgono solo per i fornitori configurati col wizard: il
+profilo distribuito col programma è in sola lettura e per lui i due pulsanti restano disattivati. Due
+fornitori non possono avere lo stesso nome.
+
 ## Come funziona il motore
 
 Ogni soglia è ricavata dal documento: nessuna coordinata fissa. Dettagli e motivazioni in

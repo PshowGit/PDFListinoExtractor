@@ -9,6 +9,7 @@ import config
 from config import elenco_fornitori, regole_fornitore
 from exporters.excel_exporter import EsportazioneFallita, esporta_listino, esporta_report_anomalie
 from extractors.pdf_reader import InfoPdf, PdfNonValido, verifica_pdf
+from gui.dialoghi import chiedi_testo
 from gui.lavoro import LavoroInProcesso
 from gui.page_viewer import FinestraPagina
 from gui.preview_table import PreviewTable
@@ -32,6 +33,7 @@ class FinestraPrincipale(ctk.CTk):
         self.minsize(980, 640)
 
         self.fornitori = elenco_fornitori()
+        self.personali = config.chiavi_personali()  # i soli che si possono rinominare o rimuovere
         self.chiave_fornitore = next(iter(self.fornitori))
         self.regole = regole_fornitore(self.chiave_fornitore)
         self.info_pdf: InfoPdf | None = None
@@ -63,10 +65,21 @@ class FinestraPrincipale(ctk.CTk):
         self.btn_seleziona = ctk.CTkButton(f, text="Seleziona PDF", command=self._seleziona_pdf, width=140)
         self.btn_seleziona.grid(row=1, column=0, padx=10, pady=(2, 10), sticky="w")
         ctk.CTkLabel(f, text="Fornitore:").grid(row=1, column=1, padx=(10, 4), pady=(2, 10))
+        scelta = ctk.CTkFrame(f, fg_color="transparent")
+        scelta.grid(row=1, column=2, padx=4, pady=(2, 10), sticky="w")
         self.menu_fornitore = ctk.CTkOptionMenu(
-            f, values=list(self.fornitori.values()), command=self._cambia_fornitore, width=280
+            scelta, values=list(self.fornitori.values()), command=self._cambia_fornitore, width=280
         )
-        self.menu_fornitore.grid(row=1, column=2, padx=4, pady=(2, 10), sticky="w")
+        self.menu_fornitore.pack(side="left")
+        self.btn_rinomina = ctk.CTkButton(
+            scelta, text="Rinomina…", command=self._rinomina_fornitore, width=90, fg_color="gray"
+        )
+        self.btn_rinomina.pack(side="left", padx=(8, 0))
+        self.btn_rimuovi = ctk.CTkButton(
+            scelta, text="Rimuovi", command=self._rimuovi_fornitore, width=80,
+            fg_color="#B04A4A", hover_color="#8E3B3B",
+        )
+        self.btn_rimuovi.pack(side="left", padx=(6, 0))
         self.btn_wizard = ctk.CTkButton(
             f, text="Configura nuovo fornitore…", command=self._apri_wizard, width=200, fg_color="gray"
         )
@@ -77,9 +90,67 @@ class FinestraPrincipale(ctk.CTk):
         self.lbl_info.grid(row=3, column=0, columnspan=3, padx=10, pady=(0, 8), sticky="ew")
 
     def _cambia_fornitore(self, nome: str):
-        self.chiave_fornitore = next(k for k, v in self.fornitori.items() if v == nome)
-        self.regole = regole_fornitore(self.chiave_fornitore)
+        self._imposta_fornitore(next(k for k, v in self.fornitori.items() if v == nome))
+
+    def _imposta_fornitore(self, chiave: str):
+        self.chiave_fornitore = chiave
+        self.menu_fornitore.set(self.fornitori[chiave])
+        self.regole = regole_fornitore(chiave)
         self.tabella.regole = self.regole
+        self._aggiorna_pulsanti()
+
+    def _ricarica_fornitori(self, seleziona: str):
+        """Rilegge l'elenco dopo un salvataggio, una rinomina o una rimozione e seleziona `seleziona`,
+        o il predefinito se non c'e' piu'."""
+        self.fornitori = elenco_fornitori()
+        self.personali = config.chiavi_personali()
+        self.menu_fornitore.configure(values=list(self.fornitori.values()))
+        self._imposta_fornitore(seleziona if seleziona in self.fornitori else next(iter(self.fornitori)))
+        if self._wizard is not None and self._wizard.winfo_exists():
+            self._wizard.aggiorna_fornitori(self.fornitori)
+
+    def _rinomina_fornitore(self):
+        chiave = self.chiave_fornitore
+        attuale = self.fornitori[chiave]
+        nome = chiedi_testo(self, "Rinomina fornitore", f"Nuovo nome per «{attuale}»:", attuale)
+        if nome is None or nome.strip() == attuale:
+            return
+        try:
+            config.rinomina_fornitore_personale(chiave, nome)
+        except config.NomeNonValido as e:
+            messagebox.showwarning("Rinomina fornitore", str(e), parent=self)
+            return
+        except (OSError, ValueError, KeyError) as e:
+            log.exception("Rinomina del fornitore non riuscita")
+            messagebox.showerror("Rinomina non riuscita", str(e), parent=self)
+            return
+        self._ricarica_fornitori(chiave)
+
+    def _rimuovi_fornitore(self):
+        chiave = self.chiave_fornitore
+        nome = self.fornitori[chiave]
+        if not messagebox.askyesno(
+            "Rimuovi fornitore",
+            f"Rimuovere il fornitore «{nome}» e le sue regole?\n\n"
+            f"La versione precedente del file resta nella copia di sicurezza:\n"
+            f"{config.percorso_regole_personali().with_suffix('.json.bak')}",
+            icon="warning",
+            parent=self,
+        ):
+            return
+        try:
+            config.rimuovi_fornitore_personale(chiave)
+        except (OSError, ValueError, KeyError) as e:
+            log.exception("Rimozione del fornitore non riuscita")
+            messagebox.showerror("Rimozione non riuscita", str(e), parent=self)
+            return
+        self._ricarica_fornitori(chiave)
+        if chiave in self.fornitori:  # sostituiva un fornitore distribuito col programma, che torna in uso
+            messagebox.showinfo(
+                "Rimuovi fornitore",
+                f"Torna in uso la configurazione distribuita col programma: «{self.fornitori[chiave]}».",
+                parent=self,
+            )
 
     def _seleziona_pdf(self):
         percorso = filedialog.askopenfilename(
@@ -332,8 +403,11 @@ class FinestraPrincipale(ctk.CTk):
         def stato(attivo: bool) -> str:
             return "normal" if attivo else "disabled"
 
+        personale = self.chiave_fornitore in self.personali
         self.btn_seleziona.configure(state=stato(not occupato))
         self.menu_fornitore.configure(state=stato(not occupato))
+        self.btn_rinomina.configure(state=stato(personale and not occupato))
+        self.btn_rimuovi.configure(state=stato(personale and not occupato))
         self.btn_wizard.configure(state=stato(not occupato))
         self.btn_estrai.configure(state=stato(self.info_pdf is not None and not occupato))
         self.btn_annulla.configure(state=stato(occupato))
@@ -363,7 +437,4 @@ class FinestraPrincipale(ctk.CTk):
 
     def _fornitore_salvato(self, chiave: str):
         """Il wizard ha salvato un fornitore: lo si rende disponibile e lo si seleziona."""
-        self.fornitori = elenco_fornitori()
-        self.menu_fornitore.configure(values=list(self.fornitori.values()))
-        self.menu_fornitore.set(self.fornitori[chiave])
-        self._cambia_fornitore(self.fornitori[chiave])
+        self._ricarica_fornitori(chiave)

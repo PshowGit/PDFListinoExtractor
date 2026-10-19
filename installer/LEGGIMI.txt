@@ -16,6 +16,8 @@ UN FORNITORE NUOVO
  "Configura nuovo fornitore..." apre il wizard: si apre il listino, il programma riconosce le colonne e
  le colora sulla pagina, si sceglie per ogni colonna il campo (Modello, Codice, EAN, Descrizione, Prezzo),
  si prova con "Anteprima pagina" e si salva. Il fornitore compare subito nel menu Fornitore.
+ "Rinomina..." e "Rimuovi", accanto al menu, cambiano il nome di un fornitore configurato col wizard
+ o lo tolgono. Il fornitore distribuito col programma non si puo' rinominare ne' rimuovere.
 
 DOVE SALVA I SUOI DATI
  %LOCALAPPDATA%\PDFListinoExtractor\logs\app.log     registro degli errori

@@ -178,3 +178,68 @@ def test_la_finestra_principale_si_costruisce(radice):
     nuova = ctk.CTk()
     nuova.withdraw()
     radice.destroy = nuova.destroy
+
+
+def test_il_dialogo_del_nome_parte_dal_nome_attuale(radice):
+    from gui.dialoghi import DialogoTesto
+
+    d = DialogoTesto(radice, "Rinomina fornitore", "Nuovo nome:", "ACME")
+    assert d.campo.get() == "ACME"
+    d.campo.delete(0, "end")
+    d.campo.insert(0, "ACME Audio")
+    d._conferma()  # come Invio o il pulsante OK
+    assert d.risultato == "ACME Audio" and not d.winfo_exists()
+
+    d = DialogoTesto(radice, "Rinomina fornitore", "Nuovo nome:", "ACME")
+    d.destroy()  # come Esc, Annulla o la chiusura della finestra
+    assert d.risultato is None and not d.winfo_exists()
+
+
+def test_rinominare_e_rimuovere_un_fornitore_dalla_finestra_principale(radice, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    import gui.main_window as finestra
+    from config import salva_fornitore_personale
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    salva_fornitore_personale("acme", {"nome": "ACME", "colonne": [{"campo": "codice"}, {"campo": "prezzo"}]})
+    avvisi = []
+    monkeypatch.setattr(messagebox, "showwarning", lambda titolo, testo, **k: avvisi.append(testo))
+    radice.destroy()
+    app = finestra.FinestraPrincipale()
+    app.withdraw()
+    try:
+        distribuito = app.fornitori["jbl_exhibo"]
+        # il fornitore distribuito col programma e' in sola lettura
+        assert app.chiave_fornitore == "jbl_exhibo"
+        assert app.btn_rinomina.cget("state") == "disabled" and app.btn_rimuovi.cget("state") == "disabled"
+        app._cambia_fornitore("ACME")
+        assert app.btn_rinomina.cget("state") == "normal" and app.btn_rimuovi.cget("state") == "normal"
+
+        monkeypatch.setattr(finestra, "chiedi_testo", lambda *a, **k: "ACME Audio 2026")
+        app._rinomina_fornitore()
+        assert app.menu_fornitore.get() == "ACME Audio 2026" and app.chiave_fornitore == "acme"
+        assert list(app.menu_fornitore.cget("values")) == [distribuito, "ACME Audio 2026"]
+        assert app.regole["nome"] == "ACME Audio 2026"
+
+        monkeypatch.setattr(finestra, "chiedi_testo", lambda *a, **k: distribuito.lower())
+        app._rinomina_fornitore()
+        assert "Esiste gia'" in avvisi[0] and app.menu_fornitore.get() == "ACME Audio 2026"
+
+        monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: False)
+        app._rimuovi_fornitore()
+        assert "acme" in app.fornitori
+
+        monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+        app._rimuovi_fornitore()
+        assert list(app.fornitori) == ["jbl_exhibo"] and app.chiave_fornitore == "jbl_exhibo"
+        assert list(app.menu_fornitore.cget("values")) == [distribuito]
+        assert app.menu_fornitore.get() == distribuito
+        assert app.btn_rimuovi.cget("state") == "disabled"
+    finally:
+        app.destroy()
+    import customtkinter as ctk
+
+    nuova = ctk.CTk()
+    nuova.withdraw()
+    radice.destroy = nuova.destroy

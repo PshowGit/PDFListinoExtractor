@@ -445,6 +445,13 @@ class WizardFornitore(ctk.CTkToplevel):
 
     # --- stato --------------------------------------------------------------------------------
 
+    def aggiorna_fornitori(self, fornitori: dict[str, str]) -> None:
+        """L'elenco e' cambiato nella finestra principale (rinomina, rimozione) mentre il wizard era aperto:
+        serve per decidere se il salvataggio sostituisce un fornitore esistente."""
+        self.fornitori = fornitori
+        if self.modello is not None:
+            self.modello.esistenti = dict(fornitori)
+
     def _stato(self, testo: str):
         self.lbl_stato.configure(text=testo)
 
