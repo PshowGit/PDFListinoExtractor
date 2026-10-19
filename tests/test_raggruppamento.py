@@ -1,6 +1,6 @@
 from extractors.table_extractor import Riga
 from processors.models import Span
-from processors.raggruppamento import a_fianco_dei_dati, corse, estensioni, gruppi, nella_fascia
+from processors.raggruppamento import a_fianco_dei_dati, coda_staccata, corse, estensioni, gruppi, nella_fascia
 
 
 def _riga(testo, y):
@@ -104,6 +104,57 @@ def test_bollino_senza_articolo_accanto_non_e_un_bollino():
     titolo = _span("ALA", 63, 35.6, corpo=12, altezza=13.4)
     dati = [_span("La serie ALA sono altoparlanti passivi", 167, 36.9)]
     assert not _bollino(titolo, dati, [_span("NSP-8", 167, 95)], intestazioni=[77.5])
+
+
+# --- coda in fondo alla pagina (misure vere del catalogo Etabeta: interlinea 11,6, corpo 9) ---------------
+
+INTERLINEA = 11.6
+
+
+def _coda(testo, altre):
+    return coda_staccata(testo, altre, INTERLINEA, CORPO)
+
+
+def test_nota_centrata_dopo_uno_stacco_si_stacca():
+    # pagina 44: «Sul sito www.cloud.co.uk potete scaricare...», centrata in un riquadro suo
+    testo = [_span("Scheda modulo RS232 opzionale", 238, 521.9), _span("Modulo opzionale che si inserisce", 167, 533.1),
+             _span("e silenziamento del microfono", 167, 554.7), _span("Sul sito www.cloud.co.uk", 200, 581.5),
+             _span("i Datasheet, i Manuali d’uso", 153, 592.3)]
+    altre = [_span("CDIS100", 167, 521.2), _span("€ 128,00", 532, 521.2)]
+    assert _coda(testo, altre) == 3
+
+
+def test_nota_in_un_altro_corpo_si_stacca():
+    # pagina 73: «VEDI vari SUB...» in corpo 10, allineata al codice
+    testo = [_span("Fligth case per 2 diffusori", 238, 693), _span("VEDI vari SUB abbinabili", 168, 732.6, corpo=10)]
+    assert _coda(testo, [_span("K-LA12A/FC", 167, 693.2)]) == 1
+
+
+def test_blocco_lontano_si_stacca():
+    # pagina 166: una riga sola sette interlinee sotto l'articolo
+    testo = [_span("Microfono a condensatore", 238, 603.6), _span("Accessori compresi: Cavo 5 metri", 238, 649),
+             _span("tutti i vari sistemi di montaggio", 238, 730.2)]
+    assert _coda(testo, [_span("PL-1601", 167, 603.6)]) == 2
+
+
+def test_caratteristiche_dopo_uno_stacco_restano():
+    codice = _span("SP12.1PB", 167, 704)
+    # pagina 42: allineate alla descrizione
+    testo = [_span("Subwoofer Passivo 12”", 238, 704), _span("Potenza Continua: 350W", 238, 732.1),
+             _span("Risposta in frequenza: 39-180Hz", 238, 742.9)]
+    assert _coda(testo, [codice]) is None
+    # pagina 25: a tutta larghezza, dall'inizio della colonna del codice
+    testo = [_span("Bluetooth Wireless Headset", 241, 579.2), _span("- Microfono ECM Array", 167, 603.5),
+             _span("- Echo Cancellation", 167, 614.3)]
+    assert _coda(testo, [_span("HP30", 167, 579.5)]) is None
+
+
+def test_dopo_uno_stacco_con_un_codice_il_testo_e_di_un_articolo():
+    # pagina 155: un kit con due codici, il secondo nello stacco
+    testo = [_span("POPS System kit composto da:", 167, 589.3), _span("Cavi da 30 m su ruzzole", 167, 645.1),
+             _span("Mobile in compensato marino", 300, 739.4)]
+    altre = [_span("1x POPS-15", 167, 601.9), _span("1x POPS-SUB", 167, 728.6)]
+    assert _coda(testo, altre) is None
 
 
 def test_estensioni_e_tagli():

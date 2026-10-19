@@ -263,6 +263,51 @@ def a_fianco_dei_dati(titolo: Riga, righe_dati: list[Riga], righe_ancora: list[R
                or (r.y0 < titolo.y0 and not any(r.y0 < y < titolo.y0 for y in intestazioni)) for r in righe_ancora)
 
 
+# stacco, in interlinee, oltre il quale un blocco di testo in fondo all'articolo puo' non essere suo
+STACCO_CODA = 2
+# stacco oltre il quale non lo e' comunque: un blocco a parte della pagina (didascalia, nota in fondo)
+STACCO_BLOCCO = 4
+# scarto di corpo che fa di un blocco un altro testo: nello stesso paragrafo il corpo e' identico (9,0 e 8,9),
+# la nota «VEDI vari SUB...» e' in corpo 10 su 9 (11%)
+SCARTO_CORPO_TESTO = 0.05
+
+
+def coda_staccata(testo: list[Riga], altre: list[Riga], interlinea: float, corpo: float) -> int | None:
+    """Da quale riga di `testo` (la descrizione dell'ultimo articolo della pagina) comincia una coda che non
+    e' dell'articolo, o None.
+
+    Nel catalogo Etabeta in fondo alla pagina c'e' spesso un testo che non e' di nessun articolo («Sul sito
+    www.cloud.co.uk potete scaricare...», «VEDI vari SUB abbinabili...», la didascalia di uno schema), anche
+    in un riquadro suo che nella griglia sembra il seguito dell'articolo: cade nella colonna della
+    descrizione e si attaccava all'ultimo articolo. Un candidato e' un blocco dopo uno stacco di almeno
+    STACCO_CODA interlinee fra le righe dell'articolo, `testo` e `altre` (le altre colonne: dopo uno stacco
+    con un codice o un prezzo, come nei kit, il testo e' di un articolo). Si stacca se lo stacco supera
+    STACCO_BLOCCO interlinee, se il blocco e' in un altro corpo, o se nessuna sua riga e' allineata a sinistra
+    con una riga dell'articolo (testo centrato). Misurato sull'Etabeta: 25 candidati, 14 staccati, tutti
+    testo che non e' dell'articolo; restano le caratteristiche dopo uno stacco, allineate alla descrizione
+    (pagina 42: «Potenza Continua: 350W...») o a tutta larghezza dal codice (schede, pagine 25, 64, 243).
+    """
+    testo = sorted(testo, key=lambda r: r.y0)
+    tutte = sorted([(r.y0, True, r) for r in testo] + [(r.y0, False, r) for r in altre], key=lambda x: x[0])
+    stacchi = [i for i in range(1, len(tutte)) if tutte[i][0] - tutte[i - 1][0] >= STACCO_CODA * interlinea]
+    for n, i in enumerate(stacchi):
+        if not all(di_testo for _, di_testo, _ in tutte[i:]):
+            continue
+        fine = stacchi[n + 1] if n + 1 < len(stacchi) else len(tutte)
+        blocco = [r for _, _, r in tutte[i:fine]]
+        sopra = [r for _, _, r in tutte[:i]]
+        descrizione = [r for _, di_testo, r in tutte[:i] if di_testo]
+        if not descrizione:
+            continue
+        corpo_sopra = sorted(r.size for r in descrizione)[len(descrizione) // 2]
+        lontano = tutte[i][0] - tutte[i - 1][0] >= STACCO_BLOCCO * interlinea
+        altro_corpo = any(abs(r.size - corpo_sopra) > SCARTO_CORPO_TESTO * corpo_sopra for r in blocco)
+        disallineato = not any(abs(r.x0 - s.x0) <= corpo for r in blocco for s in sopra)
+        if lontano or altro_corpo or disallineato:
+            return testo.index(blocco[0])
+    return None
+
+
 def nella_fascia(riga: Riga, fascia: tuple[float, float], tolleranza: float) -> bool:
     inizio, fine = fascia
     return inizio - tolleranza <= riga.y0 < fine - tolleranza

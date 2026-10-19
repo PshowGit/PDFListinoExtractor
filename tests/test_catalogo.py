@@ -98,7 +98,12 @@ def test_proposta_del_wizard_sul_catalogo(catalogo):
 def test_estrazione_del_catalogo(catalogo):
     pdf, linee = catalogo
     a = analizza_pdf(str(pdf), 1)
-    articoli = estrai_listino(pdf, profilo_da_analisi(a, [c.campo_proposto for c in a.colonne])).articoli
+    ris = estrai_listino(pdf, profilo_da_analisi(a, [c.campo_proposto for c in a.colonne]))
+    articoli = ris.articoli
+    # la nota in fondo alla pagina 2 non e' nella descrizione dell'ultimo articolo. Con la griglia sembra il seguito
+    # dell'articolo e va staccata, e finisce negli avvisi; senza, la cella centrata sul codice finisce prima
+    if linee:
+        assert any("Pagina 2: testo in fondo alla pagina" in x and "Per specifiche complete" in x for x in ris.avvisi)
     attesi_ = attesi(linee)
     assert len(articoli) == len(attesi_)
     for x, t in zip(articoli, attesi_, strict=True):

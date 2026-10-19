@@ -10,7 +10,8 @@ schede prodotto (pagine 140 e 225 del PDF vero): codice, titolo e prezzo sulla p
 le caratteristiche nella sola colonna della descrizione, nella cella successiva; un bollino «NEW» in corpo
 12 sotto il codice, nella sua cella, che non e' un titolo di sezione (pagina 13); un altro a sinistra del
 codice, accanto alla descrizione, anche senza griglia (pagina 16), e un titolo di sezione altrettanto breve
-su una fascia sua; una parola della descrizione spezzata a capo col trattino.
+su una fascia sua; una parola della descrizione spezzata a capo col trattino; una nota centrata in fondo
+alla pagina, dopo l'ultimo articolo, che non e' sua.
 """
 from dataclasses import dataclass
 from decimal import Decimal
@@ -63,6 +64,9 @@ PAGINE = [
         # un bollino «NEW» a sinistra del codice, accanto alla descrizione, anche senza griglia (pagina 16 del PDF
         # vero): non e' la categoria e non taglia l'articolo
         (["M-CAT5E-3"], ["Cavo Mogami CAT5E - 3 metri", "guaina nera"], ["EUR 19,00"], ("sinistra", "NEW")),
+        # in fondo alla pagina, dopo uno stacco, una nota centrata che non e' dell'ultimo articolo (pagina 277)
+        ("spazio", 18),
+        ("nota", "Per specifiche complete scaricare il catalogo dal sito"),
     ],
 ]
 # solo nella variante con griglia: nel PDF vero le schede prodotto hanno sempre le linee, e i tre codici in
@@ -154,6 +158,10 @@ def crea_catalogo(percorso: str | Path, linee: bool = True) -> Path:
                 for i, testo in enumerate(caratteristiche, 1):
                     _scrivi(page, X_DESC, y + i * PASSO, testo)
                 y += (len(caratteristiche) + 1) * PASSO
+                continue
+            if elem[0] == "nota":  # centrata sotto la descrizione
+                _centrato(page, 380, y, elem[1])
+                y += PASSO
                 continue
             if elem[0] == "titolo":  # titolo di sezione in corpo 12, su una fascia sua
                 y += 4

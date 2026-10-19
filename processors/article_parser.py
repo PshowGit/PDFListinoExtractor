@@ -446,6 +446,7 @@ class ParserListino:
                     per_articolo[k].setdefault(n, []).append(r)
                 elif not inizi or r.y0 < inizi[0]:
                     prima.setdefault(n, []).append(r)
+        self._stacca_coda(t, per_articolo, n_ancora, pagina)
         self._prosecuzione(t, prima, pagina, categorie)
 
         articoli = []
@@ -467,6 +468,23 @@ class ParserListino:
         if not gruppi and marche:
             self.marca = marche[-1][1]
         return articoli
+
+    def _stacca_coda(self, t: _Tabella, per_articolo: list[dict[int, list[Riga]]], n_ancora: int | None,
+                     pagina: int) -> None:
+        """Toglie dalla descrizione dell'ultimo articolo della pagina il testo in fondo che non e' suo
+        (v. raggruppamento.coda_staccata) e lo riporta negli avvisi, come il testo non attribuito."""
+        n = self._colonna_del_campo(t, "descrizione")
+        if not per_articolo or n is None or n == n_ancora or not per_articolo[-1].get(n):
+            return
+        ultimo = per_articolo[-1]
+        righe = sorted(ultimo[n], key=lambda r: r.y0)
+        altre = [r for m, v in ultimo.items() if m != n for r in v]
+        i = raggruppamento.coda_staccata(righe, altre, self.metr.interlinea, self.metr.corpo)
+        if not i:  # None, o tutta la descrizione: allora non e' una coda
+            return
+        ultimo[n] = righe[:i]
+        testo = unisci_righe([r.testo for r in righe[i:]])
+        self.avvisi.append(f"Pagina {pagina}: testo in fondo alla pagina non attribuito all'ultimo articolo: «{testo[:80]}»")
 
     def _prosecuzione(self, t: _Tabella, prima: dict[int, list[Riga]], pagina: int, categorie) -> None:
         """Testo in cima alla pagina, prima del primo articolo: e' il seguito dell'ultimo articolo."""
