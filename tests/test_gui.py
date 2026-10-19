@@ -258,6 +258,8 @@ def test_wizard_disegna_l_anteprima_sulla_pagina(radice, tmp_path):
         w._anteprima()
         _attendi(radice, lambda: w._lavoro is None)
         articoli = w.tabella.articoli()
+        # pagina e mappatura affiancate, anteprima sotto: separatori trascinabili
+        assert len(w._corpo.panes()) == 2 and len(w._sopra.panes()) == 2
         # un riquadro per articolo, coi titoli e i bollini visti dal motore
         assert [a for a, _ in w.riquadri_articoli] == articoli and len(articoli) == 3
         assert [t[4] for t in w._geometria.titoli] == ["CAVI"] and [b[4] for b in w._geometria.bollini] == ["NEW"]
@@ -555,6 +557,61 @@ def test_menu_del_filtro_coi_contatori(radice, tmp_path, monkeypatch, pdf_sintet
     nuova = ctk.CTk()
     nuova.withdraw()
     radice.destroy = nuova.destroy
+
+
+def test_avanzamento_avvisi_e_pannelli_della_finestra_principale(radice, tmp_path, monkeypatch, pdf_sintetico, regole):
+    from gui.dialoghi import FinestraAvvisi
+    from gui.main_window import PESO_LETTURA, FinestraPrincipale, _durata
+    from processors.estrazione import RisultatoEstrazione
+
+    assert (_durata(4.4), _durata(59.6), _durata(125)) == ("4 s", "1 min 00 s", "2 min 05 s")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    radice.destroy()
+    app = FinestraPrincipale()
+    app.withdraw()
+    try:
+        # tabella e dettaglio in un pannello diviso da un separatore trascinabile
+        assert len(app.pannello.panes()) == 2
+        assert app.btn_avvisi.cget("state") == "disabled"
+        # la barra si muove gia' durante la lettura (prima passata), poi nell'analisi
+        app._inizio = __import__("time").monotonic()
+        app._lettura(50, 100)
+        assert app.barra.get() == pytest.approx(PESO_LETTURA / 2, abs=0.01)
+        assert app.lbl_stato.cget("text").startswith("Lettura pagina 50 di 100 · ")
+        app._progresso(100, 100, 673)
+        assert app.barra.get() == pytest.approx(1, abs=0.01)
+        assert app.lbl_stato.cget("text").startswith("Analisi pagina 100 di 100 · 673 articoli · ")
+        # tutti gli avvisi, in una finestra che si riapre dal pulsante
+        avvisi = [f"Pagina {n}: testo non attribuito" for n in range(1, 31)]
+        ris = RisultatoEstrazione(estrai_listino(pdf_sintetico, regole).articoli, 4, avvisi=avvisi)
+        app._estrazione_finita(ris)
+        assert isinstance(app._finestra_avvisi, FinestraAvvisi) and app._finestra_avvisi.avvisi == avvisi
+        assert app._finestra_avvisi.testo.get("1.0", "end").strip().splitlines() == avvisi  # tutti, non 20
+        assert app.btn_avvisi.cget("text") == "Avvisi (30)…" and app.btn_avvisi.cget("state") == "normal"
+        assert app.lbl_stato.cget("text").startswith("Completato: 4 pagine · 9 articoli · ")
+        app._finestra_avvisi.destroy()
+        app._mostra_avvisi()
+        assert app._finestra_avvisi.winfo_exists()
+    finally:
+        app.destroy()
+    import customtkinter as ctk
+
+    nuova = ctk.CTk()
+    nuova.withdraw()
+    radice.destroy = nuova.destroy
+
+
+def test_larghezza_delle_colonne_dal_contenuto(radice):
+    from gui.preview_table import LARGHEZZA_MASSIMA, PreviewTable
+    from processors.models import Articolo
+
+    t = PreviewTable(radice, {"nome": "X", "colonne": [{"campo": "modello"}, {"campo": "descrizione"}]})
+    t.carica([Articolo("A1", descrizione="x")])
+    stretta = t.tree.column("modello", "width")
+    t.carica([Articolo("MODELLO-CON-UN-NOME-MOLTO-LUNGO-2026", descrizione="x")])
+    assert t.tree.column("modello", "width") > stretta
+    t.carica([Articolo("X" * 300, descrizione="x")])
+    assert t.tree.column("modello", "width") == LARGHEZZA_MASSIMA
 
 
 def test_dettaglio_con_le_colonne_del_documento(radice, tmp_path, monkeypatch):

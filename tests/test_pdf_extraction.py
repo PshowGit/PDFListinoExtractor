@@ -48,6 +48,14 @@ def test_progresso_per_ogni_pagina(pdf_sintetico, regole):
     assert chiamate == [(1, 4), (2, 4), (3, 4), (4, 4)]
 
 
+def test_avanzamento_anche_durante_la_lettura(pdf_sintetico, regole):
+    # la prima passata (lettura del testo) e' la parte lenta: anche lei dice a che punto e'
+    eventi = []
+    estrai_listino(pdf_sintetico, regole, lettura=lambda n, tot: eventi.append(("lettura", n, tot)),
+                   progresso=lambda n, tot, art: eventi.append(("analisi", n, tot)))
+    assert eventi == [("lettura", n, 4) for n in range(1, 5)] + [("analisi", n, 4) for n in range(1, 5)]
+
+
 def test_annullamento(pdf_sintetico, regole):
     stop = threading.Event()
     with pytest.raises(EstrazioneAnnullata):
@@ -66,7 +74,7 @@ def _messaggi_dal_processo(pdf, regole, annulla_subito=False):
     p = ctx.Process(target=esegui, args=(ESTRAZIONE, {"percorso": str(pdf), "regole": regole}, coda, annulla))
     p.start()
     messaggi = []
-    while not messaggi or messaggi[-1][0] == "progresso":
+    while not messaggi or messaggi[-1][0] in ("progresso", "lettura"):
         messaggi.append(coda.get(timeout=60))
     p.join(timeout=10)
     return messaggi, p.exitcode
@@ -76,6 +84,7 @@ def test_estrazione_nel_processo_separato(pdf_sintetico, regole):
     messaggi, uscita = _messaggi_dal_processo(pdf_sintetico, regole)
     assert uscita == 0
     assert [m[1] for m in messaggi if m[0] == "progresso"] == [1, 2, 3, 4]
+    assert [m[1:] for m in messaggi if m[0] == "lettura"] == [(n, 4) for n in range(1, 5)]
     tipo, ris = messaggi[-1]
     assert tipo == "fine" and [a.codice for a in ris.articoli] == [a.codice for a in ATTESI]
 

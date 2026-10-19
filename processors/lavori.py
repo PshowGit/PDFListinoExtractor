@@ -4,7 +4,7 @@ Tutto cio' che apre il PDF con PyMuPDF gira qui e non in un thread dell'interfac
 GIL durante l'analisi di ogni pagina, e in un thread la finestra restava ferma per quasi tutta la
 durata del lavoro (misurato: 5 s di blocco su un listino di 1.210 pagine). Si comunica solo per
 messaggi sulla coda:
-    ("progresso", pagina, totale, articoli) · ("fine", risultato) · ("annullata",)
+    ("lettura", pagina, totale) · ("progresso", pagina, totale, articoli) · ("fine", risultato) · ("annullata",)
     ("errore", messaggio_per_l_utente, dettagli_tecnici)
 """
 import traceback
@@ -16,7 +16,8 @@ def _estrazione(coda, annulla, percorso: str, regole: dict):
     from processors.estrazione import estrai_listino
 
     return estrai_listino(
-        percorso, regole, progresso=lambda n, tot, art: coda.put(("progresso", n, tot, art)), annulla=annulla
+        percorso, regole, progresso=lambda n, tot, art: coda.put(("progresso", n, tot, art)), annulla=annulla,
+        lettura=lambda n, tot: coda.put(("lettura", n, tot)),
     )
 
 

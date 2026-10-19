@@ -126,8 +126,11 @@ uv run python main.py
 1. **Seleziona PDF**: il programma controlla che il file sia un PDF leggibile e indica il numero di pagine
    e se è testuale o scansionato.
 2. **Estrai articoli**: l'estrazione gira in un processo separato, quindi la finestra resta utilizzabile;
-   si può annullare.
-3. **Anteprima**: le righe con anomalie sono evidenziate in arancione. Il menu **Mostra** fa vedere tutte le
+   si può annullare. La barra avanza sia durante la lettura delle pagine sia durante l'analisi, con il tempo
+   trascorso e una stima di quello che resta. Alla fine si apre l'elenco completo degli **avvisi** (testo non
+   attribuito a nessun articolo, pagine non lette), da copiare se serve; si riapre con **Avvisi (N)…**.
+3. **Anteprima**: le righe con anomalie sono evidenziate in arancione. La larghezza delle colonne segue il
+   contenuto; il separatore fra tabella e riquadro di dettaglio si trascina, come quelli del wizard. Il menu **Mostra** fa vedere tutte le
    righe, solo quelle da verificare o solo quelle con un tipo di anomalia («Prezzo mancante», «Duplicato»,
    «Marca mancante»…), ognuno col numero di righe; i numeri si aggiornano a ogni correzione. Si può:
    - ordinare cliccando sull'intestazione di una colonna;

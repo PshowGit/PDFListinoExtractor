@@ -63,6 +63,40 @@ class DialogoTesto(ctk.CTkToplevel):
         self.destroy()
 
 
+class FinestraAvvisi(ctk.CTkToplevel):
+    """Tutti gli avvisi dell'estrazione, uno per riga, da leggere o copiare. Non e' modale: si puo' tenere
+    aperta accanto alla tabella. Prima se ne vedevano i primi 20 in un messaggio (sul catalogo Etabeta 127),
+    e un avviso come «TUTTA QUESTA LINEA E' IN ESAURIMENTO» poteva restare nascosto."""
+
+    def __init__(self, master, avvisi: list[str]):
+        super().__init__(master)
+        self.title(f"Avvisi dell'estrazione ({len(avvisi)})")
+        self.geometry("820x420")
+        self.transient(master)
+        if icona().is_file():
+            self.after(250, lambda: self.winfo_exists() and self.iconbitmap(str(icona())))
+        self.avvisi = list(avvisi)
+        ctk.CTkLabel(self, anchor="w", justify="left", wraplength=780, text=(
+            "Testo che il programma non ha attribuito a nessun articolo, o pagine che non ha potuto leggere. "
+            "Non blocca l'esportazione: serve a controllare che non manchi niente.")).pack(
+            fill="x", padx=14, pady=(12, 4))
+        self.testo = ctk.CTkTextbox(self, wrap="word")
+        self.testo.pack(fill="both", expand=True, padx=12, pady=4)
+        self.testo.insert("1.0", "\n".join(self.avvisi))
+        self.testo.configure(state="disabled")
+        barra = ctk.CTkFrame(self, fg_color="transparent")
+        barra.pack(fill="x", padx=12, pady=(4, 12))
+        ctk.CTkButton(barra, text="Chiudi", width=110, command=self.destroy).pack(side="right")
+        ctk.CTkButton(barra, text="Copia negli appunti", width=150, fg_color="gray", command=self.copia).pack(
+            side="right", padx=8)
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.after(150, lambda: self.winfo_exists() and self.lift())
+
+    def copia(self) -> None:
+        self.clipboard_clear()
+        self.clipboard_append("\n".join(self.avvisi))
+
+
 def chiedi_testo(master, titolo: str, messaggio: str, iniziale: str = "") -> str | None:
     dialogo = DialogoTesto(master, titolo, messaggio, iniziale)
     master.wait_window(dialogo)

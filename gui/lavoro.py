@@ -26,6 +26,7 @@ class LavoroInProcesso:
         all_errore: Callable[[str], None],
         al_progresso: Callable[[int, int, int], None] | None = None,
         all_annullamento: Callable[[], None] | None = None,
+        alla_lettura: Callable[[int, int], None] | None = None,
     ):
         self.widget = widget
         self.compito = compito
@@ -34,6 +35,7 @@ class LavoroInProcesso:
         self.all_errore = all_errore
         self.al_progresso = al_progresso
         self.all_annullamento = all_annullamento
+        self.alla_lettura = alla_lettura
         self._coda = _CONTESTO.Queue()
         self._annulla = _CONTESTO.Event()
         self._processo = None
@@ -71,15 +73,17 @@ class LavoroInProcesso:
         try:
             while True:
                 msg = self._coda.get_nowait()
-                if msg[0] == "progresso":
-                    ultimo = msg
+                if msg[0] in ("progresso", "lettura"):
+                    ultimo = msg  # di lettura o analisi, si ridisegna solo l'ultimo
                 else:
                     finale = msg
                     break
         except queue.Empty:
             pass
-        if ultimo is not None and self.al_progresso:
-            self.al_progresso(*ultimo[1:])
+        if ultimo is not None:
+            gestore = self.al_progresso if ultimo[0] == "progresso" else self.alla_lettura
+            if gestore:
+                gestore(*ultimo[1:])
         if finale is None and not self._processo.is_alive():
             # morto senza dire niente (memoria esaurita, processo ucciso...)
             finale = ("errore", f"Il lavoro si e' interrotto (codice {self._processo.exitcode}).", "")

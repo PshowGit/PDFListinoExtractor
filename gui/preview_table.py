@@ -6,6 +6,7 @@ nome e ordine li decide il profilo, ordinamento e modifica li decide il ruolo.
 import tkinter as tk
 from collections.abc import Callable
 from decimal import Decimal
+from tkinter import font as tkfont
 from tkinter import messagebox, ttk
 
 import customtkinter as ctk
@@ -19,6 +20,9 @@ from processors.profilo import colonne_uscita, normalizza
 FISSE = (ColonnaUscita("pagina", "Pag.", "pagina"), ColonnaUscita("note", "Anomalie", "note"))
 LARGHEZZE = {"modello": 170, "codice": 160, "ean": 110, "descrizione": 420, "prezzo": 90, TESTO_GENERICO: 140, MARCA: 130,
              "pagina": 45, "note": 260}
+# larghezza delle colonne dal contenuto: su quante righe misurarla e fra quali limiti, in pixel dello schermo
+CAMPIONE_LARGHEZZE, LARGHEZZA_MINIMA, LARGHEZZA_MASSIMA = 300, 50, 320
+SCRITTE_MISURATE = 5  # per colonna, le piu' lunghe del campione
 # filtro della tabella: tutte le righe, quelle con almeno un'anomalia, o quelle con un tipo di anomalia (il suo nome)
 TUTTE, DA_VERIFICARE = None, "__da_verificare__"
 
@@ -147,7 +151,27 @@ class PreviewTable(ctk.CTkFrame):
             self._prossimo_id += 1
             self._articoli[iid] = a
             self._ordine.append(iid)
+        self._adatta_larghezze()
         self._ridisegna()
+
+    def _adatta_larghezze(self) -> None:
+        """Ogni colonna larga quanto il suo contenuto (su un campione di righe) e il suo titolo, entro dei limiti:
+        con le colonne dinamiche le larghezze fisse per ruolo erano troppo strette per «Codice/Articolo» e troppo
+        larghe per un modello di sei caratteri. Descrizione e anomalie restano quelle che si allargano."""
+        if not self._articoli:
+            return
+        testo = tkfont.nametofont("TkDefaultFont")
+        titolo = tkfont.Font(font=("Segoe UI", 9, "bold"))
+        righe = [self._valori(self._articoli[i]) for i in self._ordine[:CAMPIONE_LARGHEZZE]]
+        for n, c in enumerate(self.colonne):
+            if c.ruolo == "descrizione":
+                continue
+            # si misurano solo le scritte piu' lunghe: misurarle tutte bloccava la finestra per 360 ms alla fine
+            # dell'estrazione del JBL (la prima misura di ogni carattere costa, poi Tk la ricorda)
+            lunghe = sorted({str(r[n]) for r in righe}, key=len, reverse=True)[:SCRITTE_MISURATE]
+            # il titolo con lo spazio per «▸ » e per la freccia dell'ordinamento
+            misure = [titolo.measure(f"▸ {c.etichetta} ▲") + 12] + [testo.measure(s) + 16 for s in lunghe]
+            self.tree.column(c.chiave, width=max(LARGHEZZA_MINIMA, min(LARGHEZZA_MASSIMA, max(misure))))
 
     def articoli(self) -> list[Articolo]:
         """Tutti i record approvati, nell'ordine mostrato, ignorando il filtro."""

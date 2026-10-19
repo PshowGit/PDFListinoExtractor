@@ -1,5 +1,6 @@
 """Finestra principale: selezione PDF, estrazione in background, anteprima ed esportazione."""
 import logging
+import time
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -9,9 +10,10 @@ import config
 from config import elenco_fornitori, regole_fornitore
 from exporters.excel_exporter import EsportazioneFallita, esporta_listino, esporta_report_anomalie
 from extractors.pdf_reader import InfoPdf, PdfNonValido, verifica_pdf
-from gui.dialoghi import chiedi_testo
+from gui.dialoghi import FinestraAvvisi, chiedi_testo
 from gui.lavoro import LavoroInProcesso
 from gui.page_viewer import FinestraPagina
+from gui.pannelli import pannello_diviso
 from gui.preview_table import DA_VERIFICARE, TUTTE, PreviewTable
 from percorsi import icona
 from processors.estrazione import RisultatoEstrazione
@@ -21,6 +23,13 @@ from processors.price_parser import formatta_prezzo
 from version import TITOLO_APP, __version__
 
 log = logging.getLogger(__name__)
+# quota della barra per la prima passata (lettura del testo): misurato 70% del tempo sul JBL, 76% sull'Etabeta
+PESO_LETTURA = 0.7
+
+
+def _durata(secondi: float) -> str:
+    secondi = round(secondi)
+    return f"{secondi} s" if secondi < 60 else f"{secondi // 60} min {secondi % 60:02d} s"
 
 
 class FinestraPrincipale(ctk.CTk):
@@ -39,6 +48,8 @@ class FinestraPrincipale(ctk.CTk):
         self.info_pdf: InfoPdf | None = None
         self._lavoro: LavoroInProcesso | None = None  # estrazione in corso
         self._wizard = None
+        self.avvisi: list[str] = []  # dell'ultima estrazione
+        self._finestra_avvisi = None
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -190,6 +201,7 @@ class FinestraPrincipale(ctk.CTk):
         self.lbl_info.configure(text=f"✔ PDF leggibile · {info.pagine} pagine · {tipo}", text_color="gray")
         self.tabella.imposta_filtro(TUTTE)
         self.tabella.carica([])
+        self.avvisi = []  # erano del PDF di prima
         self._aggiorna_contatori()
         self._aggiorna_pulsanti()
 
@@ -211,14 +223,17 @@ class FinestraPrincipale(ctk.CTk):
         self.barra = ctk.CTkProgressBar(f)
         self.barra.set(0)
         self.barra.grid(row=1, column=2, padx=10, pady=(2, 10), sticky="ew")
-        self.lbl_stato = ctk.CTkLabel(f, text="In attesa di un PDF", anchor="w", width=360)
+        self.lbl_stato = ctk.CTkLabel(f, text="In attesa di un PDF", anchor="w", width=420)
         self.lbl_stato.grid(row=1, column=3, padx=10, pady=(2, 10), sticky="w")
+        self.btn_avvisi = ctk.CTkButton(f, text="Avvisi…", command=self._mostra_avvisi, width=110, fg_color="gray")
+        self.btn_avvisi.grid(row=1, column=4, padx=(4, 10), pady=(2, 10))
 
     def _avvia_estrazione(self):
         if self.info_pdf is None or self._lavoro is not None:
             return
         self.barra.set(0)
         self.lbl_stato.configure(text="Avvio…")
+        self._inizio = time.monotonic()
         # in un processo e non in un thread: v. processors/lavori.py per il perche'
         self._lavoro = LavoroInProcesso(
             self,
@@ -228,6 +243,7 @@ class FinestraPrincipale(ctk.CTk):
             all_errore=self._estrazione_fallita,
             al_progresso=self._progresso,
             all_annullamento=self._estrazione_annullata,
+            alla_lettura=self._lettura,
         ).avvia()
         self._aggiorna_pulsanti()
 
@@ -236,9 +252,29 @@ class FinestraPrincipale(ctk.CTk):
             self._lavoro.annulla()
             self.lbl_stato.configure(text="Annullamento in corso…")
 
+    def _lettura(self, n: int, tot: int):
+        """Prima passata: la barra va da 0 a PESO_LETTURA mentre si legge il testo delle pagine."""
+        frazione = PESO_LETTURA * n / tot
+        self.barra.set(frazione)
+        # dopo l'ultima pagina, prima dell'analisi, si calcolano le statistiche del documento (circa 1 s
+        # sull'Etabeta): senza dirlo, la scritta restava ferma su «Lettura pagina 387 di 387»
+        fase = "Lettura completata: statistiche del documento…" if n == tot else f"Lettura pagina {n} di {tot}"
+        self.lbl_stato.configure(text=fase + self._tempi(frazione))
+
     def _progresso(self, n: int, tot: int, art: int):
-        self.barra.set(n / tot)
-        self.lbl_stato.configure(text=f"Pagina {n} di {tot} · {art} articoli trovati")
+        """Seconda passata: l'analisi delle pagine lette, da PESO_LETTURA alla fine."""
+        frazione = PESO_LETTURA + (1 - PESO_LETTURA) * n / tot
+        self.barra.set(frazione)
+        self.lbl_stato.configure(text=f"Analisi pagina {n} di {tot} · {art} articoli{self._tempi(frazione)}")
+
+    def _tempi(self, frazione: float) -> str:
+        """Tempo trascorso e, quando la stima ha senso, quello che resta, in proporzione a quanto fatto."""
+        trascorso = time.monotonic() - getattr(self, "_inizio", time.monotonic())
+        testo = f" · {_durata(trascorso)}"
+        if frazione >= 0.05 and trascorso >= 1:
+            residuo = trascorso * (1 - frazione) / frazione
+            testo += f" · ancora circa {_durata(residuo)}" if residuo >= 1 else " · quasi finito"
+        return testo
 
     def _estrazione_annullata(self):
         self._lavoro = None
@@ -262,12 +298,21 @@ class FinestraPrincipale(ctk.CTk):
         testo = f"Completato: {ris.pagine_totali} pagine · {n} articoli"
         if ris.pagine_ocr:
             testo += f" · {len(ris.pagine_ocr)} pagine via OCR"
+        testo += f" · {_durata(time.monotonic() - getattr(self, '_inizio', time.monotonic()))}"
         self.lbl_stato.configure(text=testo)
+        self.avvisi = list(ris.avvisi)
         self._aggiorna_contatori()
         if ris.avvisi:
-            messagebox.showwarning("Avvisi dell'estrazione", "\n".join(ris.avvisi[:20]), parent=self)
+            self._mostra_avvisi()  # tutti, in una finestra che non blocca: si puo' riaprire da «Avvisi»
         elif n == 0:
             messagebox.showwarning("Nessun articolo", "Nel PDF non e' stato riconosciuto alcun articolo.", parent=self)
+
+    def _mostra_avvisi(self):
+        if not self.avvisi:
+            return
+        if self._finestra_avvisi is not None and self._finestra_avvisi.winfo_exists():
+            self._finestra_avvisi.destroy()
+        self._finestra_avvisi = FinestraAvvisi(self, self.avvisi)
 
     # --- C: anteprima -------------------------------------------------------------------------
 
@@ -299,12 +344,16 @@ class FinestraPrincipale(ctk.CTk):
         )
         self.btn_elimina.pack(side="right", padx=4)
 
+        # tabella e dettaglio divisi da un separatore trascinabile: il dettaglio di una descrizione lunga si legge
+        # alzandolo, la tabella si allarga abbassandolo
+        self.pannello = pannello_diviso(f, verticale=True)
+        self.pannello.grid(row=1, column=0, sticky="nsew", padx=6, pady=(4, 8))
         self.tabella = PreviewTable(
-            f, self.regole, on_change=self._aggiorna_contatori, on_select=self._mostra_dettaglio
+            self.pannello, self.regole, on_change=self._aggiorna_contatori, on_select=self._mostra_dettaglio
         )
-        self.tabella.grid(row=1, column=0, sticky="nsew", padx=6, pady=4)
-        self.dettaglio = ctk.CTkTextbox(f, height=90, wrap="word")
-        self.dettaglio.grid(row=2, column=0, sticky="ew", padx=6, pady=(4, 8))
+        self.dettaglio = ctk.CTkTextbox(self.pannello, height=90, wrap="word")
+        self.pannello.add(self.tabella, minsize=120, stretch="always")
+        self.pannello.add(self.dettaglio, minsize=48, height=90, stretch="never")
         self.dettaglio.insert(
             "1.0",
             "Doppio clic o Invio (F2) per correggere la cella; ← → scelgono la colonna (segnata con ▸). "
@@ -459,6 +508,9 @@ class FinestraPrincipale(ctk.CTk):
             self.btn_report.configure(state=stato(ha_dati and not occupato))
             self.btn_elimina.configure(state=stato(ha_dati and not occupato))
             self.btn_pagina.configure(state=stato(ha_dati and not occupato))
+        if hasattr(self, "btn_avvisi"):
+            self.btn_avvisi.configure(text=f"Avvisi ({len(self.avvisi)})…" if self.avvisi else "Avvisi…",
+                                      state=stato(bool(self.avvisi) and not occupato))
 
     def _chiudi(self):
         if self._lavoro is not None:

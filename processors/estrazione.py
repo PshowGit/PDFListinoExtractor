@@ -21,8 +21,11 @@ from processors.profilo import colonne_uscita, normalizza
 
 log = logging.getLogger(__name__)
 
-# (pagine elaborate, pagine totali, articoli trovati finora)
+# seconda passata, l'analisi: (pagine elaborate, pagine totali, articoli trovati finora)
 Progresso = Callable[[int, int, int], None]
+# prima passata, la lettura del testo delle pagine: (pagine lette, pagine da leggere). E' la parte lenta
+# (70% del tempo sul listino JBL, 76% sul catalogo Etabeta): senza, la barra restava ferma per tutta la lettura
+Lettura = Callable[[int, int], None]
 # pagine su cui si calcolano le statistiche quando se ne estrae solo una (anteprima del wizard)
 CAMPIONE_ANTEPRIMA = 30
 
@@ -66,6 +69,7 @@ def estrai_listino(
     progresso: Progresso | None = None,
     annulla: threading.Event | None = None,
     solo_pagine: list[int] | None = None,
+    lettura: Lettura | None = None,
 ) -> RisultatoEstrazione:
     regole = normalizza(regole)
     doc = apri_pdf(percorso)
@@ -77,9 +81,11 @@ def estrai_listino(
         indici = _campione(doc.page_count, solo_pagine) if solo_pagine else range(doc.page_count)
         ocr_ok: bool | None = None
         pagine: list[_Pagina] = []
-        for indice in indici:
+        for letti, indice in enumerate(indici, 1):
             if annulla is not None and annulla.is_set():
                 raise EstrazioneAnnullata()
+            if lettura:
+                lettura(letti, len(indici))
             numero = indice + 1
             page = doc[indice]
             try:

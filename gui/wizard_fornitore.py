@@ -20,6 +20,7 @@ from PIL import Image, ImageDraw, ImageTk
 
 import config
 from gui.lavoro import LavoroInProcesso
+from gui.pannelli import pannello_diviso
 from gui.preview_table import PreviewTable
 from percorsi import icona
 from processors.lavori import ANALISI, ANTEPRIMA
@@ -40,6 +41,9 @@ ZOOM = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
 # riquadri dell'anteprima sulla pagina: articoli a colori alterni, titoli di sezione, bollini scartati
 COLORI_ARTICOLO = ("#C2185B", "#00796B")
 COLORE_TITOLO, COLORE_BOLLINO = "#E53935", "#757575"
+# altezza minima di pagina e mappatura sopra l'anteprima: opzioni e pulsanti ne occupano circa 330, e l'elenco
+# delle colonne deve restare visibile
+MINIMO_SOPRA = 440
 
 
 def _chiave_per_etichetta(tabella: dict[str, str], etichetta: str) -> str:
@@ -97,14 +101,23 @@ class WizardFornitore(ctk.CTkToplevel):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         self._barra_comandi()
-        self._area_pagina()
-        self._pannello_mappatura()
-        self._area_anteprima()
+        # pagina | mappatura sopra, anteprima sotto: separatori trascinabili. All'altezza minima, con l'anteprima
+        # a misura fissa, l'elenco delle colonne si schiacciava fino a sparire
+        self._corpo = pannello_diviso(self, verticale=True)
+        self._corpo.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
+        self._sopra = pannello_diviso(self._corpo, verticale=False)
+        cornice = self._area_pagina()
+        mappatura = self._pannello_mappatura()
+        anteprima = self._area_anteprima()
+        self._sopra.add(cornice, minsize=300, stretch="always")
+        self._sopra.add(mappatura, minsize=380, width=430, stretch="never")
+        self._corpo.add(self._sopra, minsize=MINIMO_SOPRA, stretch="always")
+        self._corpo.add(anteprima, minsize=110, height=230, stretch="never")
         self.lbl_stato = ctk.CTkLabel(self, anchor="w", text=(
             "Apri un listino PDF di questo fornitore: la mappatura salvata verra' riportata sulle colonne trovate."
             if modifica else "Apri un listino PDF per cominciare."
         ))
-        self.lbl_stato.grid(row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
+        self.lbl_stato.grid(row=2, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
         self.protocol("WM_DELETE_WINDOW", self.chiudi)
         self._aggiorna_comandi()
         if pdf is not None:
@@ -153,8 +166,7 @@ class WizardFornitore(ctk.CTkToplevel):
         self.btn_tabella.pack(side="left", padx=4)
 
     def _area_pagina(self):
-        cornice = tk.Frame(self, background="#777777")
-        cornice.grid(row=1, column=0, sticky="nsew", padx=(12, 6), pady=6)
+        cornice = tk.Frame(self._sopra, background="#777777")
         self.canvas = tk.Canvas(cornice, highlightthickness=0, background="#777777")
         sy = tk.Scrollbar(cornice, orient="vertical", command=self.canvas.yview)
         sx = tk.Scrollbar(cornice, orient="horizontal", command=self.canvas.xview)
@@ -166,10 +178,10 @@ class WizardFornitore(ctk.CTkToplevel):
         cornice.grid_columnconfigure(0, weight=1)
         self.canvas.bind("<MouseWheel>", lambda e: self.canvas.yview_scroll(int(-e.delta / 120), "units"))
         self.canvas.bind("<Button-1>", self._clic_pagina)
+        return cornice
 
     def _pannello_mappatura(self):
-        p = ctk.CTkFrame(self, width=430)
-        p.grid(row=1, column=1, sticky="nsew", padx=(6, 12), pady=6)
+        p = ctk.CTkFrame(self._sopra, width=430)
         p.grid_propagate(False)
         p.grid_columnconfigure(0, weight=1)
         p.grid_rowconfigure(1, weight=1)
@@ -209,10 +221,10 @@ class WizardFornitore(ctk.CTkToplevel):
         self.btn_salva = ctk.CTkButton(b, text="Salva modifiche" if self.modifica else "Salva fornitore",
                                        command=self._salva, fg_color="#2E7D32", hover_color="#1B5E20")
         self.btn_salva.pack(side="left", expand=True, fill="x", padx=(4, 0))
+        return p
 
     def _area_anteprima(self):
-        f = ctk.CTkFrame(self, height=230)
-        f.grid(row=2, column=0, columnspan=2, sticky="ew", padx=12, pady=6)
+        f = ctk.CTkFrame(self._corpo, height=230)
         f.grid_propagate(False)
         f.grid_columnconfigure(0, weight=1)
         f.grid_rowconfigure(1, weight=1)
@@ -222,6 +234,7 @@ class WizardFornitore(ctk.CTkToplevel):
         self.tabella = PreviewTable(f, normalizza({"nome": "_", "colonne": [{"campo": "modello"}]}),
                                     on_select=self._riga_anteprima)
         self.tabella.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
+        return f
 
     # --- PDF e pagina -------------------------------------------------------------------------
 
