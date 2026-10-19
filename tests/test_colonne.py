@@ -76,3 +76,43 @@ def test_risultato_e_colonne_viaggiano_fra_processi():
                                      ColonnaUscita("testo_1", "Colore", "testo_generico")])
     copia = pickle.loads(pickle.dumps(r))
     assert copia.colonne == r.colonne and copia.articoli[0].altri == {"testo_1": "Rosso"}
+
+
+# --- export ----------------------------------------------------------------------------------------
+
+_TRE = [ColonnaUscita("modello", "Articolo", "modello"), ColonnaUscita("descrizione", "Descrizione", "descrizione"),
+        ColonnaUscita("prezzo", "Listino", "prezzo")]
+
+
+def test_excel_con_le_sole_colonne_attive(tmp_path):
+    from openpyxl import load_workbook
+
+    from exporters.excel_exporter import esporta_listino
+
+    arts = [Articolo("VMHM4I", descrizione="Scheda input", prezzo=Decimal("888.00"), pagina=22),
+            Articolo("0007", descrizione="Staffa", pagina=23)]
+    colonne = [*_TRE[:2], ColonnaUscita("testo_1", "Colore", "testo_generico"), _TRE[2]]
+    arts[0].altri["testo_1"] = "0123"  # testo: lo zero iniziale resta
+    p = tmp_path / "tre.xlsx"
+    assert esporta_listino(arts, p, colonne) == 2
+    ws = load_workbook(p)["Listino"]
+    assert [c.value for c in ws[1]] == ["Articolo", "Descrizione", "Colore", "Listino"]
+    assert ws.max_column == 4 and ws.auto_filter.ref == "A1:D3"
+    articolo, descrizione, colore, listino = ws[2]
+    assert (articolo.value, colore.value, listino.value) == ("VMHM4I", "0123", 888.0)
+    assert articolo.number_format == colore.number_format == "@" and listino.number_format == "#,##0.00"
+    assert descrizione.alignment.wrap_text
+    assert ws["A3"].value == "0007" and ws["D3"].value is None  # prezzo mancante: cella vuota
+
+
+def test_report_anomalie_con_le_colonne_che_identificano(tmp_path):
+    from openpyxl import load_workbook
+
+    from exporters.excel_exporter import esporta_report_anomalie
+
+    a = Articolo("VMHM4I", pagina=22, note_estrazione={"prezzo": "Prezzo mancante"})
+    p = tmp_path / "an.xlsx"
+    assert esporta_report_anomalie([a], p, _TRE) == 1
+    ws = load_workbook(p)["Anomalie"]
+    assert [c.value for c in ws[1]] == ["Pagina", "Articolo", "Anomalia"]
+    assert [c.value for c in ws[2]] == [22, "VMHM4I", "Prezzo mancante"]
