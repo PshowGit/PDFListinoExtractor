@@ -106,3 +106,55 @@ def crea_listino_generico(percorso: str | Path, con_intestazione: bool = True) -
     doc.save(percorso)
     doc.close()
     return percorso
+
+
+# --- colonne dinamiche -----------------------------------------------------------------------------
+# Due listini con colonne diverse dalle cinque standard: il foglio "Listino" deve avere le loro, con i
+# loro nomi. "tre": Articolo | Descrizione | Prezzo, niente codice ne' EAN. "colore": una colonna in piu'
+# («Colour») fra quelle note, che non e' il nome di nessun campo.
+_ART = [
+    ("SP-100", ["Bookshelf speaker 50W"], E[0], "Black", "249.00"),
+    ("SP-200", ["Floorstanding speaker", "walnut finish"], E[1], "Walnut", "1,249.50"),
+    ("SP-300", ["Active subwoofer 300W"], E[2], "White", "599.00"),
+    ("AMP-1", ["Stereo amplifier 2x100W"], E[3], "Silver", "349.00"),
+    ("AMP-2", ["Power amplifier 2x400W", "rack mount 2U"], E[4], "Black", "2,100.00"),
+    ("CBL-10", ["Speaker cable 10 m"], E[5], "Red", "35.00"),
+]
+VARIANTI = {
+    # (etichetta, x, allineamento, valore dell'articolo)
+    "tre": [("Articolo", 40, "sx", lambda a: [a[0]]), ("Descrizione", 140, "sx", lambda a: a[1]),
+            ("Prezzo", 550, "dx", lambda a: [a[4]])],
+    "colore": [("SKU", 40, "sx", lambda a: [a[0]]), ("Description", 120, "sx", lambda a: a[1]),
+               ("Colour", 300, "sx", lambda a: [a[3]]), ("EAN", 380, "sx", lambda a: [a[2]]),
+               ("Price EUR", 550, "dx", lambda a: [a[4]])],
+}
+ATTESI_COLONNE = {
+    "tre": (["Articolo", "Descrizione", "Prezzo"],
+            [[a[0], " ".join(a[1]), float(a[4].replace(",", ""))] for a in _ART]),
+    "colore": (["SKU", "Description", "Colour", "EAN", "Price EUR"],
+               [[a[0], " ".join(a[1]), a[3], a[2], float(a[4].replace(",", ""))] for a in _ART]),
+}
+
+
+def crea_listino_colonne(percorso: str | Path, variante: str) -> Path:
+    percorso = Path(percorso)
+    colonne = VARIANTI[variante]
+    doc = pymupdf.open()
+    for n, articoli in enumerate((_ART[:3], _ART[3:]), 1):  # tre per pagina: serve a misurare l'allineamento
+        page = doc.new_page(width=595, height=842)
+        _scrivi(page, 40, 40, "ACME Audio Srl - Listino 2026", 14)
+        y = 110.0
+        for etichetta, x, allinea, _ in colonne:
+            (_a_destra if allinea == "dx" else _scrivi)(page, x, y, etichetta)
+        y += 24
+        for a in articoli:
+            righe = 1
+            for _, x, allinea, valore in colonne:
+                for i, testo in enumerate(valore(a)):
+                    (_a_destra if allinea == "dx" else _scrivi)(page, x, y + i * INTERLINEA, testo)
+                righe = max(righe, len(valore(a)))
+            y += righe * INTERLINEA + STACCO
+        _scrivi(page, 520, 805, f"Pagina {n} / 2", 7)
+    doc.save(percorso)
+    doc.close()
+    return percorso

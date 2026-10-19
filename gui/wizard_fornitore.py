@@ -76,6 +76,7 @@ class WizardFornitore(ctk.CTkToplevel):
         self._lavoro: LavoroInProcesso | None = None
         self._riquadri: list[ctk.CTkFrame] = []
         self._menu_colonne: list[ctk.CTkOptionMenu] = []
+        self._nomi_colonne: list[ctk.CTkEntry] = []  # nome della colonna nella tabella e nell'Excel
         self._selezionata: int | None = None
         self.ultimo_salvataggio: Path | None = None
 
@@ -278,7 +279,7 @@ class WizardFornitore(ctk.CTkToplevel):
     def _costruisci_colonne(self):
         for w in self.elenco_colonne.winfo_children():
             w.destroy()
-        self._riquadri, self._menu_colonne, self._selezionata = [], [], None
+        self._riquadri, self._menu_colonne, self._nomi_colonne, self._selezionata = [], [], [], None
         for i, col in enumerate(self.modello.analisi.colonne):
             r = ctk.CTkFrame(self.elenco_colonne, border_width=2, border_color="#D0D0D0")
             r.grid(row=i, column=0, sticky="ew", padx=2, pady=3)
@@ -296,9 +297,14 @@ class WizardFornitore(ctk.CTkToplevel):
             menu = ctk.CTkOptionMenu(r, values=list(ETICHETTE_CAMPO.values()), width=150,
                                      command=lambda etichetta, i=i, c=campione: self._cambia_campo(i, etichetta, c))
             menu.set(ETICHETTE_CAMPO[self.modello.campi[i]])
-            menu.grid(row=0, column=2, rowspan=2, padx=6)
+            menu.grid(row=0, column=2, padx=6, pady=(6, 2))
+            nome = ctk.CTkEntry(r, width=150, placeholder_text="nome della colonna")
+            nome.grid(row=1, column=2, padx=6, pady=(0, 6))
+            nome.bind("<KeyRelease>", lambda e, i=i, w=nome: self.modello.imposta_etichetta(i, w.get()))
             self._riquadri.append(r)
             self._menu_colonne.append(menu)
+            self._nomi_colonne.append(nome)
+            self._mostra_nome(i)
 
     def _mostra_opzioni(self):
         m = self.modello
@@ -317,9 +323,20 @@ class WizardFornitore(ctk.CTkToplevel):
         campione = self._riquadri[indice].winfo_children()[0]
         self._cambia_campo(indice, ETICHETTE_CAMPO[campo], campione)
 
+    def _mostra_nome(self, indice: int):
+        """Il nome della colonna come lo tiene il modello; niente nome per le colonne ignorate o composite."""
+        w = self._nomi_colonne[indice]
+        w.configure(state="normal")
+        w.delete(0, "end")
+        if self.modello.etichette[indice]:
+            w.insert(0, self.modello.etichette[indice])
+        if self.modello.campi[indice] in ("ignora", "identificativo"):
+            w.configure(state="disabled")
+
     def _cambia_campo(self, indice: int, etichetta: str, campione):
         campo = _chiave_per_etichetta(ETICHETTE_CAMPO, etichetta)
         self.modello.imposta_campo(indice, campo)
+        self._mostra_nome(indice)  # il nome proposto segue il ruolo
         campione.configure(fg_color=COLORI_CAMPO[campo])
         self._ridisegna()
         self._mostra_errori()

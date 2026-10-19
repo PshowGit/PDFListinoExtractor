@@ -102,13 +102,15 @@ def test_wizard_dalla_pdf_al_fornitore_salvato(radice, tmp_path, monkeypatch):
     w.withdraw()
     _attendi(radice, lambda: w.modello is not None)  # analisi nel processo separato
     assert [m.get() for m in w._menu_colonne] == ["Codice", "Descrizione", "EAN", "Prezzo"]
+    assert [n.get() for n in w._nomi_colonne] == ["SKU", "Description", "EAN", "Price EUR"]
     assert w.lbl_totale.cget("text") == "di 3"
 
-    # un cambio di mappatura arriva al modello e si vede sulla pagina
+    # un cambio di mappatura arriva al modello e si vede sulla pagina; il nome segue il ruolo
     w.seleziona_colonna(2)
     w.imposta_campo(2, "ignora")
-    assert w.modello.campi[2] == "ignora"
+    assert w.modello.campi[2] == "ignora" and w._nomi_colonne[2].get() == ""
     w.imposta_campo(2, "ean")
+    assert w._nomi_colonne[2].get() == "EAN"
 
     w._anteprima()
     _attendi(radice, lambda: w._lavoro is None)
@@ -271,6 +273,7 @@ def test_wizard_in_modifica_riprende_e_aggiorna_il_fornitore(radice, tmp_path, m
     _attendi(radice, lambda: w.modello is not None)
     assert "Modifica fornitore" in w.title() and w.btn_salva.cget("text") == "Salva modifiche"
     assert [x.get() for x in w._menu_colonne] == ["Codice", "Descrizione", "— ignora —", "Prezzo"]
+    assert [x.get() for x in w._nomi_colonne] == ["SKU", "Description", "", "Price EUR"]
     assert w.ent_nome.get() == "ACME" and w.menu_formato.get() == "Italiano (1.234,56)"
     assert "4 colonne su 4 riprese" in w.lbl_stato.cget("text")
 

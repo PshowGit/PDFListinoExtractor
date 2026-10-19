@@ -199,3 +199,58 @@ def test_modifica_non_puo_prendere_il_nome_di_un_altro_fornitore(modello):
     assert any("Esiste gia'" in e for e in nuovo.errori())
     nuovo.nome = "acme"
     assert nuovo.errori() == []
+
+
+# --- colonne dinamiche ---------------------------------------------------------------------------
+
+@pytest.fixture
+def colore(tmp_path):
+    from tests.sintetico_generico import crea_listino_colonne
+
+    pdf = crea_listino_colonne(tmp_path / "colore.pdf", "colore")
+    return ModelloWizard(analizza_pdf(str(pdf), 1)), pdf
+
+
+def test_colonna_in_piu_proposta_come_testo_col_suo_nome(colore):
+    m, _ = colore
+    # «Colour» non e' il nome di un campo e il contenuto direbbe «modello», ma l'articolo ha gia' il codice
+    assert m.campi == ["codice", "descrizione", "testo_generico", "ean", "prezzo"]
+    assert m.etichette == ["SKU", "Description", "Colour", "EAN", "Price EUR"]
+
+
+def test_il_profilo_salva_i_nomi_e_l_export_li_usa(colore):
+    from tests.sintetico_generico import ATTESI_COLONNE
+
+    m, pdf = colore
+    m.nome = "ACME"
+    p = m.profilo()
+    valida_schema({"versione_schema": 2, "fornitori": {"acme": p}})
+    assert [c.get("etichetta") for c in p["colonne"]] == ["SKU", "Description", "Colour", None, "Price EUR"]
+    assert p["colonne"][2]["intestazioni"] == ["Colour"]  # per ritrovarla nelle altre pagine
+    r = estrai_listino(pdf, p)
+    assert [c.etichetta for c in r.colonne] == ATTESI_COLONNE["colore"][0]
+    assert [x.altri["testo_1"] for x in r.articoli] == [riga[2] for riga in ATTESI_COLONNE["colore"][1]]
+    assert all(x.categoria == "" for x in r.articoli)  # «Colour» non e' una marca
+
+
+def test_il_nome_segue_il_ruolo_ma_non_cancella_quello_scelto(colore):
+    m, _ = colore
+    m.imposta_campo(2, "ignora")
+    assert m.etichette[2] == ""
+    m.imposta_campo(2, "testo_generico")
+    assert m.etichette[2] == "Colour"
+    m.imposta_etichetta(1, "Descr. breve")
+    m.imposta_campo(1, "testo_generico")
+    assert m.etichette[1] == "Descr. breve"
+
+
+def test_nomi_proposti_sul_listino_generico(modello):
+    m, _ = modello
+    assert m.etichette == ["SKU", "Description", "EAN", "Price EUR"]
+
+
+def test_nome_proposto_da_un_etichetta_su_due_righe(pdf_sintetico):
+    # «Prezzo al» / «Pubblico»: il nome e' l'etichetta intera; la colonna composita esce coi nomi standard
+    m = ModelloWizard(analizza_pdf(str(pdf_sintetico), 1))
+    assert m.campi == ["identificativo", "descrizione", "prezzo"]
+    assert m.etichette == ["", "Descrizione", "Prezzo al Pubblico"]

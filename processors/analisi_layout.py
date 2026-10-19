@@ -29,7 +29,7 @@ from extractors.table_extractor import (
 from extractors.text_extractor import estrai_span
 from processors.data_validator import ean_valido
 from processors.estrazione import _campione
-from processors.models import Span
+from processors.models import INTESTAZIONI, TESTO_GENERICO, Span
 from processors.price_parser import parse_prezzo
 from processors.profilo import (
     CAMPI_DATI,
@@ -57,6 +57,7 @@ class ColonnaRilevata:
     da_intestazione: bool = False
     righe: int = 0
     fine_testo: float | None = None  # fine del testo della colonna (solo se ricostruita senza intestazione)
+    etichetta_completa: str = ""  # l'etichetta con le sue righe seguenti («Prezzo al Pubblico»): per il nome
 
 
 @dataclass
@@ -235,8 +236,19 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
         totale = sum(n for _, n in allineato[i])
         return sum(a * n for a, n in allineato[i]) / totale if totale else 0.0
 
+    # etichette su due righe («Prezzo al» / «Pubblico»): la seconda riga va all'etichetta con cui si
+    # sovrappone di piu', come il testo alle colonne. Serve solo al nome proposto della colonna
+    complete = [c.etichetta for c in fisiche]
+    if intest is not None and len(intest.colonne) == len(fisiche):
+        seguito = sorted((s for s in pagine[pagina][0] if intest.y0 + tol < s.y0 <= intest.y1), key=lambda s: (s.y0, s.x0))
+        for s in seguito:
+            n = assegna_colonna(s, intest.colonne, generico["spaziatura"]["tolleranza_colonna_pt"])
+            if n is not None:
+                complete[n] = f"{complete[n]} {s.testo.strip()}"
     colonne = []
     piu_piena = max((len(t) for t in testi), default=0)
+    # ruoli gia' dati da un'etichetta riconosciuta: servono a riconoscere una colonna in piu' (sotto)
+    da_etichetta = {c for _, _, c in partenze if c is not None}
     for i, (x, etichetta, campo_intestazione) in enumerate(partenze):
         dal_contenuto = proponi_campo(testi[i])
         quasi_vuota = len(testi[i]) < QUOTA_COLONNA_VUOTA * piu_piena  # didascalie sparse, non dati
@@ -246,9 +258,16 @@ def analizza(pagine: dict[int, tuple[list[Span], float, float]], pagina: int, se
         campo = campo_intestazione or dal_contenuto
         if dal_contenuto == "identificativo" and campo in ("modello", "codice"):
             campo = "identificativo"  # l'intestazione dice "Modello", ma ci sono anche codice ed EAN
+        if campo_intestazione is None and intest is not None and campo in ("modello", "descrizione") and (
+            campo in da_etichetta or (campo == "modello" and da_etichetta & {"codice", "identificativo"})
+        ):
+            # un'etichetta che non e' il nome di un campo («Colour») sopra testo allineato, quando quel ruolo
+            # l'ha gia' un'altra colonna, o l'articolo ha gia' il suo codice: e' una colonna in piu'
+            campo = TESTO_GENERICO
         x1 = xs[i + 1] - 1 if i + 1 < len(xs) else larghezza
         fine = max([s.x1 for s in spans_col[i]] + ([fisiche[i].x1] if fisiche[i].x1 else []), default=None)
-        colonne.append(ColonnaRilevata(x, x1, etichetta, campo, esempi[i], intest is not None, len(testi[i]), fine))
+        colonne.append(ColonnaRilevata(x, x1, etichetta, campo, esempi[i], intest is not None, len(testi[i]), fine,
+                                       complete[i]))
 
     ha_parentesi = any(c.campo_proposto in ("identificativo",) for c in colonne) or any(
         _CODICE_PARENTESI.match(t) for c, tt in zip(colonne, testi, strict=True) if c.campo_proposto == "codice" for t in tt
@@ -307,25 +326,32 @@ def profilo_da_analisi(
     codice_con_parentesi: bool = True,
     linee: bool | None = None,
     codici_tra_parentesi: bool | None = None,
+    etichette: list[str] | None = None,
 ) -> dict:
     """Profilo (schema 2) da una mappatura colonna -> campo decisa sulle colonne dell'analisi.
 
     Due opzioni distinte sulle parentesi: `codici_tra_parentesi` dice che nel PDF i codici sono
     scritti cosi' (serve a riconoscerli, e a separarli dal nome in una colonna composita);
-    `codice_con_parentesi` dice se tenerle nell'Excel.
+    `codice_con_parentesi` dice se tenerle nell'Excel. `etichette` sono i nomi delle colonne nella
+    tabella e nell'Excel: si salvano solo quelli diversi dal nome standard del campo.
     """
     if codici_tra_parentesi is None:
         codici_tra_parentesi = analisi.regex_codice_proposta is not None
     colonne = []
-    for col, campo in zip(analisi.colonne, campi, strict=True):
+    for i, (col, campo) in enumerate(zip(analisi.colonne, campi, strict=True)):
         # si salva come intestazione solo un'etichetta che e' il nome di un campo: la marca o il titolo
         # di una tabella valgono per quella tabella sola, e le altre si riconoscono per posizione
         nome_di_campo = campo_da_intestazione(col.etichetta)[0] is not None
         voce = {
             "campo": campo,
-            "intestazioni": [col.etichetta] if col.da_intestazione and nome_di_campo else [],
+            # una colonna di testo si ritrova dal suo nome («Colour»), come quelle col nome di un campo
+            "intestazioni": [col.etichetta] if col.da_intestazione and (nome_di_campo or campo == TESTO_GENERICO)
+            else [],
             "x_relativo": round(col.x0 / analisi.larghezza, 4),
         }
+        nome_colonna = (etichette[i] if etichette is not None else "").strip()
+        if nome_colonna and campo not in ("ignora", "identificativo") and nome_colonna != INTESTAZIONI.get(campo):
+            voce["etichetta"] = nome_colonna
         if col.fine_testo is not None:
             voce["x_fine_relativo"] = round(min(1.0, col.fine_testo / analisi.larghezza), 4)
         if campo == "identificativo":

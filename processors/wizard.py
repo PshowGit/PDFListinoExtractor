@@ -7,8 +7,16 @@ cosi' la parte che decide cosa finisce nel file delle regole si prova senza apri
 Per modificare un fornitore gia' salvato, `applica_profilo` riporta la sua mappatura sulle colonne
 trovate nella pagina analizzata; al salvataggio `profilo` conserva le regole che il wizard non mostra.
 """
-from processors.analisi_layout import AnalisiLayout, profilo_da_analisi
-from processors.profilo import CAMPI_ANCORA, REGEX_CODICE_PARENTESI, chiave_da_nome, normalizza, normalizza_testo
+from processors.analisi_layout import AnalisiLayout, ColonnaRilevata, profilo_da_analisi
+from processors.models import INTESTAZIONI, TESTO_GENERICO
+from processors.profilo import (
+    CAMPI_ANCORA,
+    REGEX_CODICE_PARENTESI,
+    campo_da_intestazione,
+    chiave_da_nome,
+    normalizza,
+    normalizza_testo,
+)
 
 ETICHETTE_CAMPO = {
     "ignora": "— ignora —",
@@ -18,6 +26,7 @@ ETICHETTE_CAMPO = {
     "descrizione": "Descrizione",
     "prezzo": "Prezzo",
     "identificativo": "Modello + Codice + EAN (impilati)",
+    TESTO_GENERICO: "Testo (colonna in piu')",
 }
 ETICHETTE_ANCORA = {
     "auto": "Automatica (per densità)",
@@ -35,11 +44,32 @@ COLORI_CAMPO = {
     "descrizione": "#2CA02C",
     "prezzo": "#D62728",
     "identificativo": "#FF7F0E",
+    TESTO_GENERICO: "#17BECF",
 }
 
 
 def campi_di(campo_colonna: str) -> set[str]:
+    if campo_colonna == TESTO_GENERICO:
+        return set()  # non e' un campo del motore: non identifica l'articolo e non fa da ancora
     return {"modello", "codice", "ean"} if campo_colonna == "identificativo" else {campo_colonna}
+
+
+def etichetta_proposta(col: ColonnaRilevata, campo: str) -> str:
+    """Nome proposto per la colonna nella tabella e nell'Excel.
+
+    L'etichetta del PDF se e' il nome di quel campo («Articolo», «Listino»), altrimenti il nome standard:
+    nel catalogo Etabeta sopra la descrizione c'e' il titolo della tabella, che cambia a ogni tabella.
+    Una colonna di testo prende la sua etichetta; una composita o ignorata non ha nome (le colonne
+    impilate escono coi nomi standard).
+    """
+    if campo in ("ignora", "identificativo"):
+        return ""
+    etichetta = col.etichetta_completa or col.etichetta
+    if campo == TESTO_GENERICO:
+        return etichetta if col.da_intestazione else ""
+    if col.da_intestazione and campo_da_intestazione(etichetta)[0] == campo:
+        return etichetta
+    return INTESTAZIONI[campo]
 
 
 def abbina_colonne(analisi: AnalisiLayout, salvate: list[dict]) -> list[int | None]:
@@ -88,6 +118,7 @@ class ModelloWizard:
         self.codice_con_parentesi = True  # se tenerle nell'Excel
         self.linee_divisorie = analisi.linee_divisorie_proposte
         self.nome = ""
+        self.etichette = [etichetta_proposta(c, campo) for c, campo in zip(analisi.colonne, self.campi, strict=True)]
         # solo modificando un fornitore salvato: la sua chiave, il profilo com'era e, per colonna, la voce
         # salvata che le corrisponde
         self.chiave_fissa: str | None = None
@@ -107,6 +138,10 @@ class ModelloWizard:
         for i, voce in enumerate(self.origine):
             if voce is not None and voce["campo"] in ETICHETTE_CAMPO:
                 self.campi[i] = voce["campo"]
+                # senza un nome salvato vale quello standard: un profilo di prima esce come prima
+                self.etichette[i] = voce.get("etichetta") or (
+                    next(iter(voce.get("intestazioni") or []), "") if voce["campo"] == TESTO_GENERICO
+                    else INTESTAZIONI.get(voce["campo"], ""))
         self.ancora = effettivo["ancora"] if effettivo["ancora"] in ETICHETTE_ANCORA else "auto"
         self.formato_prezzo = effettivo["formato_prezzo"]
         self.codici_tra_parentesi = effettivo["regex"].get("codice") is not None
@@ -117,7 +152,14 @@ class ModelloWizard:
     def imposta_campo(self, indice: int, campo: str) -> None:
         if campo not in ETICHETTE_CAMPO:
             raise ValueError(f"Campo sconosciuto: {campo}")
+        col, vecchio = self.analisi.colonne[indice], self.campi[indice]
+        # il nome segue il ruolo finche' e' quello proposto; uno scelto dall'utente resta
+        if self.etichette[indice] in ("", etichetta_proposta(col, vecchio), INTESTAZIONI.get(vecchio)):
+            self.etichette[indice] = etichetta_proposta(col, campo)
         self.campi[indice] = campo
+
+    def imposta_etichetta(self, indice: int, etichetta: str) -> None:
+        self.etichette[indice] = etichetta
 
     def campi_mappati(self) -> set[str]:
         return set().union(*(campi_di(c) for c in self.campi if c != "ignora")) if self.campi else set()
@@ -171,6 +213,7 @@ class ModelloWizard:
             codice_con_parentesi=self.codice_con_parentesi,
             linee=self.linee_divisorie,
             codici_tra_parentesi=self.codici_tra_parentesi,
+            etichette=self.etichette,
         )
         return nuovo if self.originale is None else self._con_originale(nuovo)
 
