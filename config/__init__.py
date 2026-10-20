@@ -9,11 +9,15 @@ rimozione di un fornitore scrivono soltanto il file personale.
 Formato: versione 2, descritto da config/supplier_rules.schema.json. Un file personale nella
 versione 1 si legge ancora (la conversione avviene in memoria) e si riscrive in versione 2 solo al
 primo salvataggio, conservandone una copia .bak.
+
+I fornitori personali si esportano in un file dello stesso formato e si importano su un'altra
+postazione: l'importazione li aggiunge a quelli che ci sono, senza sovrascriverne nessuno.
 """
 import json
 import logging
 import os
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from percorsi import cartella_dati_utente, cartella_risorse
@@ -156,13 +160,13 @@ def _da_modificare(percorso: Path) -> dict:
     return {"versione_schema": VERSIONE_SCHEMA, "fornitori": {}}
 
 
-def _scrivi_personali(dati: dict, percorso: Path) -> None:
+def _scrivi_personali(dati: dict, percorso: Path, copia: bool = True) -> None:
     """Scrittura atomica (file temporaneo + sostituzione), in utf-8-sig come lo salverebbe il Blocco
     note, con una copia .bak del file precedente. Il contenuto viene validato prima di toccare il
     file: se non e' valido, file e copia restano com'erano.
     """
     valida_schema(dati)
-    if percorso.is_file():
+    if copia and percorso.is_file():
         shutil.copy2(percorso, percorso.with_suffix(".json.bak"))
     temporaneo = percorso.with_suffix(".json.tmp")
     with open(temporaneo, "w", encoding="utf-8-sig") as f:
@@ -226,3 +230,127 @@ def rimuovi_fornitore_personale(chiave: str, percorso: Path | None = None) -> Pa
     _scrivi_personali(dati, percorso)
     log.info("Rimosso il fornitore %s da %s", chiave, percorso)
     return percorso
+
+
+def esporta_fornitori_personali(destinazione: Path, percorso: Path | None = None) -> int:
+    """Scrive in `destinazione` i fornitori del file personale, per importarli su un'altra postazione.
+
+    Solo i fornitori creati dall'utente (quelli distribuiti li ha gia' ogni installazione) e i suoi
+    sinonimi; il predefinito no, perche' riguarda la postazione. Restituisce quanti fornitori ha scritto.
+    """
+    percorso = percorso or percorso_regole_personali()
+    dati = _a_versione_2(_leggi_personali(percorso))
+    if not dati["fornitori"]:
+        raise RegoleNonValide("Non ci sono fornitori personali da esportare.")
+    uscita = {"versione_schema": VERSIONE_SCHEMA, "fornitori": dati["fornitori"]}
+    if dati.get("sinonimi"):
+        uscita["sinonimi"] = dati["sinonimi"]
+    _scrivi_personali(uscita, Path(destinazione), copia=False)
+    log.info("Esportati %d fornitori in %s", len(uscita["fornitori"]), destinazione)
+    return len(uscita["fornitori"])
+
+
+SUFFISSO_IMPORTATO = " - Importato"
+
+
+@dataclass
+class EsitoImportazione:
+    aggiunti: list[str] = field(default_factory=list)  # chiavi nel file personale, nell'ordine del file
+    rinominati: list[tuple[str, str]] = field(default_factory=list)  # (nome nel file, nome dato)
+    gia_presenti: list[str] = field(default_factory=list)  # nomi saltati perche' identici a un fornitore locale
+
+
+def _leggi_da_importare(sorgente: Path) -> dict:
+    """Il file da importare in versione 2 e validato; RegoleNonValide se non e' un file di regole."""
+    try:
+        dati = _leggi(sorgente)
+        if not isinstance(dati, dict) or not isinstance(dati.get("fornitori"), dict):
+            raise TypeError("non contiene un elenco di fornitori")
+        if not _e_versione_2(dati):  # un supplier_rules.json della versione 1.0 copiato a mano
+            dati = _a_versione_2(dati)
+        valida_schema(dati)
+    except OSError:
+        raise
+    except _ERRORI_LETTURA as e:
+        raise RegoleNonValide(f"{Path(sorgente).name} non e' un file di fornitori valido: {e}") from e
+    if not dati["fornitori"]:
+        raise RegoleNonValide(f"{Path(sorgente).name} non contiene fornitori.")
+    return dati
+
+
+def _senza_nome(profilo: dict) -> dict:
+    return {k: v for k, v in profilo.items() if k != "nome"}
+
+
+def _gia_importato(profilo: dict, locale: dict) -> bool:
+    """Lo stesso fornitore c'e' gia': regole identiche e lo stesso nome, o quello che gli ha dato
+    un'importazione precedente. Reimportare lo stesso file non deve creare copie."""
+    nome = profilo["nome"].strip().lower()
+    for p in locale.values():
+        n = p.get("nome", "").strip().lower()
+        if _senza_nome(p) == _senza_nome(profilo) and (
+            n == nome or n.startswith(nome + SUFFISSO_IMPORTATO.lower())
+        ):
+            return True
+    return False
+
+
+def _chiave_libera(base: str, occupate) -> str:
+    base = base[:64]
+    n = 2
+    chiave = base
+    while chiave in occupate:
+        chiave = f"{base[:60]}_{n}"
+        n += 1
+    return chiave
+
+
+def importa_fornitori(sorgente: Path, percorso: Path | None = None) -> EsitoImportazione:
+    """Aggiunge al file personale i fornitori di un file esportato (o di un supplier_rules.json).
+
+    Non sovrascrive nulla: un fornitore con la chiave di uno personale riceve una chiave nuova, e
+    uno col nome di un fornitore gia' nel menu il suffisso « - Importato» (il nome deve restare
+    unico, come nella rinomina). Con la chiave di un fornitore distribuito lo sostituisce, come
+    faceva sulla postazione da cui viene. Un fornitore identico a uno locale si salta. Se il file
+    non e' valido solleva RegoleNonValide e il file personale resta com'era.
+    """
+    percorso = percorso or percorso_regole_personali()
+    importati = _leggi_da_importare(Path(sorgente))
+    dati = _da_modificare(percorso)
+    locale = dati["fornitori"]
+    distribuiti = _leggi(PERCORSO_REGOLE)["fornitori"]
+    esito = EsitoImportazione()
+    for chiave, profilo in importati["fornitori"].items():
+        profilo = {**profilo, "nome": profilo["nome"].strip() or chiave}
+        if _gia_importato(profilo, locale):
+            esito.gia_presenti.append(profilo["nome"])
+            continue
+        if chiave in locale:
+            chiave = _chiave_libera(f"{chiave}_importato", locale)
+        usati = {
+            p.get("nome", k).strip().lower() for k, p in {**distribuiti, **locale}.items() if k != chiave
+        }
+        nome = profilo["nome"]
+        if nome.lower() in usati:
+            nome = f"{profilo['nome']}{SUFFISSO_IMPORTATO}"
+            n = 2
+            while nome.lower() in usati:
+                nome = f"{profilo['nome']}{SUFFISSO_IMPORTATO} {n}"
+                n += 1
+            esito.rinominati.append((profilo["nome"], nome))
+        locale[chiave] = {**profilo, "nome": nome}
+        esito.aggiunti.append(chiave)
+    sinonimi_nuovi = False
+    for campo, voci in importati.get("sinonimi", {}).items():
+        presenti = dati.setdefault("sinonimi", {}).setdefault(campo, [])
+        for voce in voci:
+            if voce not in presenti:
+                presenti.append(voce)
+                sinonimi_nuovi = True
+    if esito.aggiunti or sinonimi_nuovi:
+        _scrivi_personali(dati, percorso)
+    log.info(
+        "Importati da %s: %d fornitori, %d rinominati, %d gia' presenti",
+        sorgente, len(esito.aggiunti), len(esito.rinominati), len(esito.gia_presenti),
+    )
+    return esito

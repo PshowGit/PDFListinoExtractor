@@ -39,7 +39,7 @@ class FinestraPrincipale(ctk.CTk):
         if icona().is_file():
             self.iconbitmap(str(icona()))
         self.geometry("1280x820")
-        self.minsize(1040, 640)  # la riga del fornitore: menu, tre pulsanti e il wizard
+        self.minsize(1070, 640)  # la riga del fornitore: menu, tre pulsanti e il wizard (con importa ed esporta sotto)
 
         self.fornitori = elenco_fornitori()
         self.personali = config.chiavi_personali()  # i soli che si possono rinominare o rimuovere
@@ -96,9 +96,20 @@ class FinestraPrincipale(ctk.CTk):
         )
         self.btn_rimuovi.pack(side="left", padx=(6, 0))
         self.btn_wizard = ctk.CTkButton(
-            f, text="Configura nuovo fornitore…", command=self._apri_wizard, width=200, fg_color="gray"
+            f, text="Configura nuovo fornitore…", command=self._apri_wizard, width=238, fg_color="gray"
         )
         self.btn_wizard.grid(row=1, column=3, padx=10, pady=(2, 10), sticky="e")
+        # per portare i fornitori configurati su un'altra postazione
+        trasferimento = ctk.CTkFrame(f, fg_color="transparent")
+        trasferimento.grid(row=2, column=3, rowspan=2, padx=10, pady=(0, 8), sticky="ne")
+        self.btn_importa_fornitori = ctk.CTkButton(
+            trasferimento, text="Importa fornitori…", command=self._importa_fornitori, width=116, fg_color="gray"
+        )
+        self.btn_importa_fornitori.pack(side="left")
+        self.btn_esporta_fornitori = ctk.CTkButton(
+            trasferimento, text="Esporta fornitori…", command=self._esporta_fornitori, width=116, fg_color="gray"
+        )
+        self.btn_esporta_fornitori.pack(side="left", padx=(6, 0))
         self.lbl_file = ctk.CTkLabel(f, text="Nessun file selezionato", anchor="w")
         self.lbl_file.grid(row=2, column=0, columnspan=3, padx=10, sticky="ew")
         self.lbl_info = ctk.CTkLabel(f, text="", anchor="w", text_color="gray")
@@ -176,6 +187,66 @@ class FinestraPrincipale(ctk.CTk):
                 f"Torna in uso la configurazione distribuita col programma: «{self.fornitori[chiave]}».",
                 parent=self,
             )
+
+    def _esporta_fornitori(self):
+        if not self.personali:
+            messagebox.showinfo(
+                "Esporta fornitori",
+                "Non ci sono fornitori da esportare: si esportano quelli configurati col wizard, "
+                "e su questa postazione non ce n'e' ancora nessuno.",
+                parent=self,
+            )
+            return
+        destinazione = filedialog.asksaveasfilename(
+            parent=self, title="Esporta i fornitori configurati", defaultextension=".json",
+            initialfile="Fornitori PDFListinoExtractor.json",
+            filetypes=[("Regole dei fornitori", "*.json"), ("Tutti i file", "*.*")],
+        )
+        if not destinazione:
+            return
+        try:
+            quanti = config.esporta_fornitori_personali(Path(destinazione))
+        except (OSError, ValueError) as e:
+            log.exception("Esportazione dei fornitori non riuscita")
+            messagebox.showerror("Esportazione non riuscita", str(e), parent=self)
+            return
+        quanti_fornitori = "Esportato 1 fornitore" if quanti == 1 else f"Esportati {quanti} fornitori"
+        messagebox.showinfo(
+            "Esporta fornitori",
+            f"{quanti_fornitori} in:\n{destinazione}\n\nSull'altra postazione si caricano con «Importa fornitori…».",
+            parent=self,
+        )
+
+    def _importa_fornitori(self):
+        sorgente = filedialog.askopenfilename(
+            parent=self, title="Importa i fornitori da un file esportato",
+            filetypes=[("Regole dei fornitori", "*.json"), ("Tutti i file", "*.*")],
+        )
+        if not sorgente:
+            return
+        try:
+            esito = config.importa_fornitori(Path(sorgente))
+        except config.RegoleNonValide as e:
+            messagebox.showerror("File non valido", f"{e}\n\nNon e' stato importato nulla.", parent=self)
+            return
+        except (OSError, ValueError, TypeError, AttributeError) as e:
+            log.exception("Importazione dei fornitori non riuscita")
+            messagebox.showerror("Importazione non riuscita", f"{e}\n\nNon e' stato importato nulla.", parent=self)
+            return
+        self._ricarica_fornitori(esito.aggiunti[0] if esito.aggiunti else self.chiave_fornitore)
+        righe = []
+        if esito.aggiunti:
+            nomi = "\n".join(f"  • {self.fornitori[k]}" for k in esito.aggiunti if k in self.fornitori)
+            righe.append(f"Fornitori aggiunti al menu ({len(esito.aggiunti)}):\n{nomi}")
+        if esito.rinominati:
+            righe.append("Rinominati perche' il nome era gia' in uso:\n" + "\n".join(
+                f"  • «{prima}» → «{dopo}»" for prima, dopo in esito.rinominati
+            ))
+        if esito.gia_presenti:
+            righe.append("Gia' presenti, non importati di nuovo:\n" + "\n".join(
+                f"  • {nome}" for nome in esito.gia_presenti
+            ))
+        messagebox.showinfo("Importa fornitori", "\n\n".join(righe) or "Nessun fornitore importato.", parent=self)
 
     def _seleziona_pdf(self):
         percorso = filedialog.askopenfilename(
@@ -501,6 +572,8 @@ class FinestraPrincipale(ctk.CTk):
         self.btn_rinomina.configure(state=stato(personale and not occupato))
         self.btn_rimuovi.configure(state=stato(personale and not occupato))
         self.btn_wizard.configure(state=stato(not occupato))
+        self.btn_importa_fornitori.configure(state=stato(not occupato))
+        self.btn_esporta_fornitori.configure(state=stato(not occupato))
         self.btn_estrai.configure(state=stato(self.info_pdf is not None and not occupato))
         self.btn_annulla.configure(state=stato(occupato))
         if hasattr(self, "btn_esporta"):

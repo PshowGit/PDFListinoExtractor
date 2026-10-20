@@ -130,3 +130,126 @@ def test_chiavi_personali(tmp_path):
     assert config.chiavi_personali(percorso) == {"acme", "beta"}
     percorso.write_text("{ rovinato", encoding="utf-8")
     assert config.chiavi_personali(percorso) == set()  # come carica_regole, che lo ignora
+
+
+def _profilo(nome, campo="codice"):
+    return {"nome": nome, "colonne": [{"campo": campo}, {"campo": "prezzo"}]}
+
+
+def test_esportare_e_importare_su_un_altra_postazione(tmp_path):
+    vecchia = tmp_path / "vecchia" / "supplier_rules.json"
+    vecchia.parent.mkdir()
+    config.salva_fornitore_personale("acme", _profilo("ACME"), vecchia)
+    config.salva_fornitore_personale("beta", _profilo("Beta", "ean"), vecchia)
+    esportato = tmp_path / "Fornitori.json"
+    assert config.esporta_fornitori_personali(esportato, vecchia) == 2
+    assert esportato.read_bytes().startswith(b"\xef\xbb\xbf")  # come il file personale
+    assert not esportato.with_suffix(".json.bak").exists()
+
+    nuova = tmp_path / "nuova" / "supplier_rules.json"
+    nuova.parent.mkdir()
+    esito = config.importa_fornitori(esportato, nuova)  # sulla postazione nuova il file non c'e' ancora
+    assert esito.aggiunti == ["acme", "beta"] and not esito.rinominati and not esito.gia_presenti
+    assert _fornitori_nel_file(nuova) == _fornitori_nel_file(vecchia)
+    assert {"acme", "beta"} <= set(carica_regole(PERCORSO_REGOLE, personali=nuova)["fornitori"])
+
+
+def test_senza_fornitori_personali_non_si_esporta(tmp_path):
+    with pytest.raises(OSError):
+        config.esporta_fornitori_personali(tmp_path / "f.json", tmp_path / "assente.json")
+    percorso = _personali_con(tmp_path, acme="ACME")
+    config.rimuovi_fornitore_personale("acme", percorso)
+    with pytest.raises(config.RegoleNonValide):
+        config.esporta_fornitori_personali(tmp_path / "f.json", percorso)
+    assert not (tmp_path / "f.json").exists()
+
+
+def test_importare_non_sovrascrive_i_fornitori_locali(tmp_path):
+    percorso = tmp_path / "supplier_rules.json"
+    config.salva_fornitore_personale("acme", _profilo("ACME"), percorso)
+    config.salva_fornitore_personale("gamma", _profilo("Gamma"), percorso)
+    locali = _fornitori_nel_file(percorso)
+    distribuito = carica_regole(PERCORSO_REGOLE, personali=tmp_path / "assente.json")["fornitori"]["jbl_exhibo"]
+    da_importare = tmp_path / "importa.json"
+    da_importare.write_text(json.dumps({"versione_schema": 2, "fornitori": {
+        "acme": _profilo("ACME", "ean"),  # stessa chiave e stesso nome, regole diverse
+        "delta": _profilo("gamma", "modello"),  # chiave nuova, nome gia' in uso (maiuscole a parte)
+        "epsilon": _profilo(distribuito["nome"]),  # il nome del fornitore distribuito
+    }}), encoding="utf-8")
+
+    esito = config.importa_fornitori(da_importare, percorso)
+    fornitori = _fornitori_nel_file(percorso)
+    assert fornitori["acme"] == locali["acme"] and fornitori["gamma"] == locali["gamma"]
+    assert fornitori["acme_importato"] == _profilo("ACME - Importato", "ean")
+    assert fornitori["delta"]["nome"] == "gamma - Importato"
+    assert fornitori["epsilon"]["nome"] == f"{distribuito['nome']} - Importato"
+    assert esito.aggiunti == ["acme_importato", "delta", "epsilon"]
+    assert esito.rinominati == [("ACME", "ACME - Importato"), ("gamma", "gamma - Importato"),
+                                (distribuito["nome"], f"{distribuito['nome']} - Importato")]
+    assert _fornitori_nel_file(percorso.with_suffix(".json.bak")) == locali
+    nomi = [p["nome"].lower() for p in carica_regole(PERCORSO_REGOLE, personali=percorso)["fornitori"].values()]
+    assert len(nomi) == len(set(nomi))  # il menu riconosce il fornitore dal nome
+
+    # reimportare lo stesso file non crea copie, e senza nulla di nuovo il file non si tocca
+    prima = percorso.read_bytes()
+    esito = config.importa_fornitori(da_importare, percorso)
+    assert esito.aggiunti == [] and len(esito.gia_presenti) == 3
+    assert percorso.read_bytes() == prima
+
+
+def test_importare_un_secondo_conflitto_numera_il_nome(tmp_path):
+    percorso = tmp_path / "supplier_rules.json"
+    config.salva_fornitore_personale("acme", _profilo("ACME"), percorso)
+    config.salva_fornitore_personale("acme_importato", _profilo("ACME - Importato", "ean"), percorso)
+    da_importare = tmp_path / "importa.json"
+    da_importare.write_text(json.dumps({"versione_schema": 2, "fornitori": {"acme": _profilo("ACME", "modello")}}),
+                            encoding="utf-8")
+    esito = config.importa_fornitori(da_importare, percorso)
+    assert esito.aggiunti == ["acme_importato_2"]
+    assert _fornitori_nel_file(percorso)["acme_importato_2"]["nome"] == "ACME - Importato 2"
+
+
+def test_importare_un_fornitore_che_sostituiva_quello_distribuito(tmp_path):
+    # sulla postazione di partenza il personale con la chiave del distribuito lo sostituiva: idem qui
+    da_importare = tmp_path / "importa.json"
+    da_importare.write_text(json.dumps({"versione_schema": 2, "fornitori": {
+        "jbl_exhibo": _profilo("JBL modificato")}}), encoding="utf-8")
+    percorso = tmp_path / "supplier_rules.json"
+    assert config.importa_fornitori(da_importare, percorso).aggiunti == ["jbl_exhibo"]
+    assert carica_regole(PERCORSO_REGOLE, personali=percorso)["fornitori"]["jbl_exhibo"]["nome"] == "JBL modificato"
+
+
+def test_importare_un_file_della_versione_1_e_i_sinonimi(tmp_path):
+    percorso = _personali_con(tmp_path, acme="ACME")
+    da_importare = tmp_path / "vecchio.json"
+    v1 = {"nome": "Zeta", "colonne_predefinite": {"modello_x": 40, "descrizione_x": 200, "prezzo_x": 500}}
+    da_importare.write_bytes(b"\xef\xbb\xbf" + json.dumps({"fornitori": {"zeta": v1}}).encode())
+    assert config.importa_fornitori(da_importare, percorso).aggiunti == ["zeta"]
+    zeta = _fornitori_nel_file(percorso)["zeta"]
+    assert zeta["nome"] == "Zeta" and [c["campo"] for c in zeta["colonne"]] == ["identificativo", "descrizione", "prezzo"]
+
+    con_sinonimi = tmp_path / "sinonimi.json"
+    con_sinonimi.write_text(json.dumps({"versione_schema": 2, "sinonimi": {"codice": ["Art.", "Rif."]},
+                                        "fornitori": {"acme": _profilo("ACME")}}), encoding="utf-8")
+    config.importa_fornitori(con_sinonimi, percorso)
+    config.importa_fornitori(con_sinonimi, percorso)
+    dati = json.loads(percorso.read_text(encoding="utf-8-sig"))
+    assert dati["sinonimi"] == {"codice": ["Art.", "Rif."]}  # senza doppioni
+
+
+@pytest.mark.parametrize("contenuto", [
+    "{ non e' json",
+    "[1, 2]",
+    json.dumps({"versione_schema": 2, "fornitori": {}}),
+    json.dumps({"versione_schema": 2, "fornitori": {"Chiave Errata": {"nome": "X", "colonne": [{"campo": "codice"}]}}}),
+    json.dumps({"versione_schema": 2, "fornitori": {"x": {"nome": "X", "colonne": [{"campo": "colore"}]}}}),
+    json.dumps({"versione_schema": 2, "fornitori": {"x": {"nome": "X"}}}),
+])
+def test_importare_un_file_non_valido_non_tocca_nulla(tmp_path, contenuto):
+    percorso = _personali_con(tmp_path, acme="ACME")
+    prima = percorso.read_bytes()
+    da_importare = tmp_path / "importa.json"
+    da_importare.write_text(contenuto, encoding="utf-8")
+    with pytest.raises(config.RegoleNonValide, match="importa.json"):
+        config.importa_fornitori(da_importare, percorso)
+    assert percorso.read_bytes() == prima

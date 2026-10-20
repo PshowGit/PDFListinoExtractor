@@ -450,6 +450,58 @@ def test_rinominare_e_rimuovere_un_fornitore_dalla_finestra_principale(radice, t
     radice.destroy = nuova.destroy
 
 
+def test_esportare_e_importare_i_fornitori_dalla_finestra_principale(radice, tmp_path, monkeypatch):
+    import json
+    from tkinter import filedialog, messagebox
+
+    import gui.main_window as finestra
+    from config import salva_fornitore_personale
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "vecchia"))
+    salva_fornitore_personale("acme", {"nome": "ACME", "colonne": [{"campo": "codice"}, {"campo": "prezzo"}]})
+    esportato = tmp_path / "Fornitori.json"
+    messaggi = []
+    monkeypatch.setattr(messagebox, "showinfo", lambda titolo, testo, **k: messaggi.append(testo))
+    monkeypatch.setattr(messagebox, "showerror", lambda titolo, testo, **k: messaggi.append(("errore", testo)))
+    monkeypatch.setattr(filedialog, "asksaveasfilename", lambda **k: str(esportato))
+    monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: str(esportato))
+    radice.destroy()
+    app = finestra.FinestraPrincipale()
+    app.withdraw()
+    try:
+        assert app.btn_esporta_fornitori.cget("state") == "normal"
+        app._esporta_fornitori()
+        assert esportato.is_file() and "Esportato 1 fornitore" in messaggi[-1]
+    finally:
+        app.destroy()
+
+    # la postazione nuova ha gia' un suo «ACME»: quello importato non lo sovrascrive
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "nuova"))
+    salva_fornitore_personale("acme", {"nome": "ACME", "colonne": [{"campo": "ean"}, {"campo": "prezzo"}]})
+    app = finestra.FinestraPrincipale()
+    app.withdraw()
+    try:
+        distribuito = app.fornitori["jbl_exhibo"]
+        app._importa_fornitori()
+        assert list(app.menu_fornitore.cget("values")) == [distribuito, "ACME", "ACME - Importato"]
+        assert app.chiave_fornitore == "acme_importato" and app.menu_fornitore.get() == "ACME - Importato"
+        assert app.regole["colonne"][0]["campo"] == "codice"
+        assert "acme_importato" in app.personali and app.btn_rimuovi.cget("state") == "normal"
+        assert "«ACME» → «ACME - Importato»" in messaggi[-1]
+
+        esportato.write_text(json.dumps({"versione_schema": 2, "fornitori": {"x": {"nome": "X"}}}), encoding="utf-8")
+        app._importa_fornitori()
+        assert messaggi[-1][0] == "errore" and "Non e' stato importato nulla" in messaggi[-1][1]
+        assert list(app.fornitori) == ["jbl_exhibo", "acme", "acme_importato"]
+    finally:
+        app.destroy()
+    import customtkinter as ctk
+
+    nuova = ctk.CTk()
+    nuova.withdraw()
+    radice.destroy = nuova.destroy
+
+
 def test_wizard_in_modifica_riprende_e_aggiorna_il_fornitore(radice, tmp_path, monkeypatch):
     from tkinter import messagebox
 

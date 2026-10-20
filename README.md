@@ -201,6 +201,15 @@ Accanto al menu «Fornitore»:
 Valgono solo per i fornitori configurati col wizard: il profilo distribuito col programma è in sola lettura e
 per lui i tre pulsanti restano disattivati. Due fornitori non possono avere lo stesso nome.
 
+Sotto «Configura nuovo fornitore…», per portare i fornitori su un'altra postazione:
+
+- **Esporta fornitori…** salva in un file `.json` tutti i fornitori configurati col wizard (non quello
+  distribuito, che ogni installazione ha già).
+- **Importa fornitori…** li aggiunge a quelli della postazione, dopo aver verificato il file con lo schema: se
+  non è valido non si importa nulla. Non sovrascrive niente: un fornitore con lo stesso nome di uno già nel menu
+  arriva come «Nome - Importato», e uno identico a uno già presente si salta, quindi importare due volte lo
+  stesso file non crea doppioni. La versione precedente del file personale resta nella copia `.bak`.
+
 ## Come funziona il motore
 
 Ogni soglia è ricavata dal documento: nessuna coordinata fissa. Dettagli e motivazioni in
