@@ -6,7 +6,7 @@ scripts/build_installer.bat (versione dell'installer). Per cambiarla:
 che aggiorna anche pyproject.toml.
 """
 
-__version__ = "1.5.2"
+__version__ = "1.6.0"
 
 NOME_APP = "PDFListinoExtractor"
 TITOLO_APP = "Estrattore listini PDF"
