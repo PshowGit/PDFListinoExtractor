@@ -26,6 +26,7 @@ from processors.profilo import normalizza
 log = logging.getLogger(__name__)
 PERCORSO_REGOLE = cartella_risorse() / "config" / "supplier_rules.json"
 PERCORSO_SCHEMA = cartella_risorse() / "config" / "supplier_rules.schema.json"
+PERCORSO_MODELLO = cartella_risorse() / "config" / "modello_fornitori.json"
 NOME_FILE_PERSONALE = "supplier_rules.json"
 VERSIONE_SCHEMA = 2
 
@@ -354,3 +355,24 @@ def importa_fornitori(sorgente: Path, percorso: Path | None = None) -> EsitoImpo
         sorgente, len(esito.aggiunti), len(esito.rinominati), len(esito.gia_presenti),
     )
     return esito
+
+
+def predisponi_personali(modello: Path = PERCORSO_MODELLO, percorso: Path | None = None) -> bool:
+    """Alla prima avvio, se non esiste ancora il file personale, lo crea copiando il modello incluso
+    nel programma: i fornitori in esso compaiono nel menu e si modificano o rimuovono come gli altri.
+
+    Solo se il file manca: un fornitore rimosso non torna alla successiva apertura del programma.
+    Restituisce True se ha creato il file. Un modello mancante o non valido non blocca nulla.
+    """
+    percorso = percorso or percorso_regole_personali()
+    if percorso.exists() or not modello.is_file():
+        return False
+    try:
+        valida_schema(_leggi(modello))
+    except (OSError, ValueError, RegoleNonValide) as e:
+        log.warning("Modello di fornitori non valido, non copiato: %s", e)
+        return False
+    percorso.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(modello, percorso)
+    log.info("Creato il file dei fornitori da %s in %s", modello, percorso)
+    return True

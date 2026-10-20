@@ -1,0 +1,49 @@
+{
+    "versione_schema":  2,
+    "fornitori":  {
+                      "jbl":  {
+                                  "nome":  "JBL",
+                                  "colonne":  [
+                                                  {
+                                                      "campo":  "identificativo",
+                                                      "intestazioni":  [
+                                                                           "Modello"
+                                                                       ],
+                                                      "x_relativo":  0.1714,
+                                                      "x_fine_relativo":  0.2996,
+                                                      "contiene":  [
+                                                                       "modello",
+                                                                       "codice",
+                                                                       "ean"
+                                                                   ]
+                                                  },
+                                                  {
+                                                      "campo":  "descrizione",
+                                                      "intestazioni":  [
+                                                                           "Descrizione"
+                                                                       ],
+                                                      "x_relativo":  0.3395,
+                                                      "x_fine_relativo":  0.7772
+                                                  },
+                                                  {
+                                                      "campo":  "prezzo",
+                                                      "intestazioni":  [
+                                                                           "Prezzo al"
+                                                                       ],
+                                                      "x_relativo":  0.7849,
+                                                      "etichetta":  "Prezzo al Pubblico",
+                                                      "x_fine_relativo":  0.8483
+                                                  }
+                                              ],
+                                  "ancora":  "codice",
+                                  "spaziatura":  {
+                                                     "linee_divisorie":  true
+                                                 },
+                                  "regex":  {
+                                                "codice":  "^\\((?P\u003cvalore\u003e[^()]+)\\)$"
+                                            },
+                                  "formato_prezzo":  "it",
+                                  "codice_con_parentesi":  false
+                              }
+                  }
+}

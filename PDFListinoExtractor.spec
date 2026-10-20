@@ -35,6 +35,7 @@ info_versione = VSVersionInfo(
 dati = [
     (str(RADICE / "config" / "supplier_rules.json"), "config"),
     (str(RADICE / "config" / "supplier_rules.schema.json"), "config"),  # lo applica il salvataggio del wizard
+    (str(RADICE / "config" / "modello_fornitori.json"), "config"),  # copiato al primo avvio
     (str(RADICE / "assets" / "icona.ico"), "assets"),
 ]
 dati += collect_data_files("customtkinter")  # temi e font: senza, la finestra non si apre

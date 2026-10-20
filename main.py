@@ -51,11 +51,13 @@ def main() -> int:
     try:
         import customtkinter as ctk
 
+        import config
         from gui.collaudo import collaudo_richiesto, esegui_collaudo
         from gui.main_window import FinestraPrincipale
 
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
+        config.predisponi_personali()  # al primo avvio il file dei fornitori c'e' gia'
         if collaudo_richiesto(sys.argv):
             return esegui_collaudo(sys.argv)
         app = FinestraPrincipale()

@@ -66,6 +66,11 @@ Aggiornamento e disinstallazione **non toccano i dati dell'utente**:
 | Regole personali (facoltative) | `%LOCALAPPDATA%\PDFListinoExtractor\supplier_rules.json` |
 | File Excel esportati | dove li ha salvati l'utente |
 
+Al primo avvio su un computer, se il file di regole personali non c'è ancora, il programma lo crea copiando
+`config/modello_fornitori.json`: i fornitori del modello (oggi «JBL») compaiono subito nel menu e si
+modificano, rinominano o rimuovono come quelli creati col wizard. Il file non viene più ricreato, quindi un
+fornitore rimosso non torna, e gli aggiornamenti non lo toccano.
+
 Il file di regole personali lo scrive il wizard, nel formato di `config/supplier_rules.json` (schema
 versione 2; un file della versione 1.0 si legge ancora e si converte al primo salvataggio). I fornitori che
 contiene si aggiungono a quelli inclusi nel programma, o li sostituiscono se hanno la stessa chiave. Se il

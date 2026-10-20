@@ -92,7 +92,10 @@ try {
     $reg = Get-ItemProperty $chiave
     Verifica 'Stessa cartella, una sola voce in App installate' ($reg.InstallLocation.TrimEnd('\') -eq $dir -and
         @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -like 'PDFListinoExtractor*' }).Count -eq 1) $reg.InstallLocation
-    Verifica 'Regole personali non toccate' (-not (Test-Path "$env:LOCALAPPDATA\PDFListinoExtractor\supplier_rules.json"))
+    # al primo avvio il programma crea il file dei fornitori dal modello incluso: l'aggiornamento non lo riscrive
+    $personali = "$env:LOCALAPPDATA\PDFListinoExtractor\supplier_rules.json"
+    Verifica 'File dei fornitori creato dal modello e non riscritto' ((Test-Path $personali) -and
+        (Get-FileHash $personali).Hash -eq (Get-FileHash "$dir\_internal\config\modello_fornitori.json").Hash)
 } finally {
     Processi | Stop-Process -Force
     Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue

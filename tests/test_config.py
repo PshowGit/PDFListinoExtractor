@@ -253,3 +253,41 @@ def test_importare_un_file_non_valido_non_tocca_nulla(tmp_path, contenuto):
     with pytest.raises(config.RegoleNonValide, match="importa.json"):
         config.importa_fornitori(da_importare, percorso)
     assert percorso.read_bytes() == prima
+
+
+def test_al_primo_avvio_il_file_dei_fornitori_c_e_gia(tmp_path):
+    personali = tmp_path / "PDFListinoExtractor" / "supplier_rules.json"
+    assert config.predisponi_personali(config.PERCORSO_MODELLO, personali) is True
+    assert personali.read_bytes() == config.PERCORSO_MODELLO.read_bytes()
+    assert "jbl" in config.chiavi_personali(personali)
+    assert "jbl" in carica_regole(PERCORSO_REGOLE, personali=personali)["fornitori"]
+
+
+def test_il_file_esistente_non_si_tocca(tmp_path):
+    personali = _personali_con(tmp_path, acme="ACME")
+    prima = personali.read_bytes()
+    assert config.predisponi_personali(config.PERCORSO_MODELLO, personali) is False
+    assert personali.read_bytes() == prima
+
+
+def test_un_fornitore_rimosso_non_torna_al_successivo_avvio(tmp_path):
+    personali = tmp_path / "supplier_rules.json"
+    config.predisponi_personali(config.PERCORSO_MODELLO, personali)
+    config.rimuovi_fornitore_personale("jbl", personali)
+    assert config.predisponi_personali(config.PERCORSO_MODELLO, personali) is False
+    assert "jbl" not in config.chiavi_personali(personali)
+
+
+def test_un_modello_non_valido_non_viene_copiato(tmp_path):
+    modello = tmp_path / "modello.json"
+    modello.write_text(json.dumps({"versione_schema": 2, "fornitori": {"x": {"nome": "X"}}}), encoding="utf-8")
+    personali = tmp_path / "supplier_rules.json"
+    assert config.predisponi_personali(modello, personali) is False
+    assert not personali.exists()
+    assert config.predisponi_personali(tmp_path / "assente.json", personali) is False
+
+
+def test_il_modello_incluso_e_valido_e_senza_predefinito():
+    dati = config._leggi(config.PERCORSO_MODELLO)
+    config.valida_schema(dati)
+    assert list(dati["fornitori"]) == ["jbl"] and "predefinito" not in dati
