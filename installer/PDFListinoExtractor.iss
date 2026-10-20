@@ -72,6 +72,21 @@ Name: "{autodesktop}\{#NomeApp}"; Filename: "{app}\{#Eseguibile}"; Comment: "{#T
 
 [Run]
 Filename: "{app}\{#Eseguibile}"; Description: "{cm:LaunchProgram,{#NomeApp}}"; Flags: nowait postinstall skipifsilent
+; Aggiornamento dal programma (aggiornamento.py): installazione /SILENT con /RIAVVIA, e alla fine il
+; programma si riapre da solo. Un'installazione silenziosa senza /RIAVVIA (per esempio dall'IT) non lo apre.
+Filename: "{app}\{#Eseguibile}"; Flags: nowait postinstall skipifnotsilent; Check: DaAggiornamento
 
 ; Nessuna sezione [UninstallDelete] sui dati utente: la disinstallazione rimuove il programma ma
 ; lascia %LOCALAPPDATA%\PDFListinoExtractor (log, regole personali) e i file Excel esportati.
+
+; [Code] resta in fondo: da qui in poi le righe sono Pascal, e ";" non vi introduce un commento.
+[Code]
+function DaAggiornamento: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/RIAVVIA') = 0 then
+      Result := True;
+end;

@@ -1,4 +1,5 @@
 """Test dell'anteprima senza mostrarla: crea la finestra Tk, la usa e la distrugge."""
+import time
 import tkinter as tk
 from decimal import Decimal
 
@@ -765,3 +766,175 @@ def test_dettaglio_con_le_colonne_del_documento(radice, tmp_path, monkeypatch):
     nuova = ctk.CTk()
     nuova.withdraw()
     radice.destroy = nuova.destroy
+
+
+def _finestra_con_aggiornamento(radice, tmp_path, monkeypatch, rilascio):
+    """Finestra principale come nell'eseguibile installato, con l'API di GitHub simulata."""
+    import aggiornamento
+    import gui.main_window as finestra
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(aggiornamento, "attivo", lambda: True)
+    monkeypatch.setattr(aggiornamento, "pulisci_scaricati", lambda: None)
+    monkeypatch.setattr(aggiornamento, "cerca_aggiornamento", lambda: rilascio)
+    radice.destroy()
+    app = finestra.FinestraPrincipale()
+    app.withdraw()
+    app._controlla_aggiornamento()  # all'avvio parte dopo 1,5 s
+    limite = time.monotonic() + 5
+    while app.rilascio is None and rilascio is not None and time.monotonic() < limite:
+        app.update()
+        time.sleep(0.05)
+    return app, finestra
+
+
+def _radice_nuova(radice):
+    import customtkinter as ctk
+
+    nuova = ctk.CTk()
+    nuova.withdraw()
+    radice.destroy = nuova.destroy
+
+
+def _rilascio_di_prova():
+    from aggiornamento import Rilascio
+
+    return Rilascio("9.1.0", "v9.1.0", "## Novità\n\n- **Una** cosa", "https://example.com/release", "u", "0" * 64, 1)
+
+
+def test_senza_aggiornamenti_il_pulsante_non_compare(radice, tmp_path, monkeypatch):
+    app, _ = _finestra_con_aggiornamento(radice, tmp_path, monkeypatch, None)
+    try:
+        for _ in range(10):
+            app.update()
+            time.sleep(0.03)
+        assert app.rilascio is None and not app.btn_aggiornamento.grid_info()
+    finally:
+        app.destroy()
+    _radice_nuova(radice)
+
+
+def test_aggiornamento_disponibile_e_ignorato(radice, tmp_path, monkeypatch):
+    import aggiornamento
+
+    app, finestra = _finestra_con_aggiornamento(radice, tmp_path, monkeypatch, _rilascio_di_prova())
+    try:
+        assert app.btn_aggiornamento.grid_info() and app.btn_aggiornamento.cget("text") == (
+            "Aggiornamento disponibile (v9.1.0)")
+
+        class Ignora(finestra.DialogoAggiornamento):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                assert "• Una cosa" in self.note.get("1.0", "end")
+                self.after(100, lambda: self._scegli("ignora"))
+
+        monkeypatch.setattr(finestra, "DialogoAggiornamento", Ignora)
+        app._apri_aggiornamento()
+        assert aggiornamento.versione_ignorata() == "9.1.0" and not app.btn_aggiornamento.grid_info()
+        assert not (tmp_path / "PDFListinoExtractor" / "supplier_rules.json").exists()
+        # al prossimo avvio la versione ignorata non si propone piu'
+        app.rilascio = None
+        app._mostra_aggiornamento(_rilascio_di_prova())
+        assert app.rilascio is None and not app.btn_aggiornamento.grid_info()
+    finally:
+        app.destroy()
+    _radice_nuova(radice)
+
+
+def test_aggiorna_ora_scarica_avvia_e_chiude(radice, tmp_path, monkeypatch):
+    import aggiornamento
+
+    app, finestra = _finestra_con_aggiornamento(radice, tmp_path, monkeypatch, _rilascio_di_prova())
+    setup = tmp_path / "PDFListinoExtractor_Setup_9.1.0.exe"
+    avviati, chiusa = [], []
+
+    class Aggiorna(finestra.DialogoAggiornamento):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.after(100, lambda: self._scegli("aggiorna"))
+
+    def scarica(rilascio, avanzamento, annullato):
+        for letti in (10, 20):
+            avanzamento(letti, 20)
+            time.sleep(0.05)
+        return setup
+
+    monkeypatch.setattr(finestra, "DialogoAggiornamento", Aggiorna)
+    monkeypatch.setattr(aggiornamento, "modo_installazione", lambda: "/CURRENTUSER")
+    monkeypatch.setattr(aggiornamento, "scarica", scarica)
+    monkeypatch.setattr(aggiornamento, "avvia_installazione", lambda percorso, modo: avviati.append((percorso, modo)))
+    monkeypatch.setattr(app, "_chiudi", lambda: chiusa.append(True))
+    try:
+        app._apri_aggiornamento()
+        assert avviati == [(setup, "/CURRENTUSER")] and chiusa == [True]
+
+        # file non integro: si dice perche', non si installa e il programma resta aperto
+        def non_valido(*a):
+            raise aggiornamento.AggiornamentoNonValido("SHA-256 diverso")
+
+        errori = []
+        monkeypatch.setattr(aggiornamento, "scarica", non_valido)
+        from tkinter import messagebox
+        monkeypatch.setattr(messagebox, "showerror", lambda titolo, testo, **k: errori.append(testo))
+        app._apri_aggiornamento()
+        assert errori == ["SHA-256 diverso"] and len(avviati) == 1 and chiusa == [True]
+
+        # con articoli in tabella si chiede prima di chiudere
+        from processors.models import Articolo
+        app.tabella.carica([Articolo(pagina=1, modello="A")])
+        monkeypatch.setattr(aggiornamento, "scarica", scarica)
+        monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: False)
+        app._apri_aggiornamento()
+        assert len(avviati) == 1
+    finally:
+        app.destroy()
+    _radice_nuova(radice)
+
+
+def test_copia_non_installata_apre_la_pagina(radice, tmp_path, monkeypatch):
+    import aggiornamento
+
+    app, finestra = _finestra_con_aggiornamento(radice, tmp_path, monkeypatch, _rilascio_di_prova())
+    aperte = []
+
+    class Aggiorna(finestra.DialogoAggiornamento):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            assert self.btn_aggiorna.cget("text") == "Apri la pagina di download"
+            self.after(100, lambda: self._scegli("aggiorna"))
+
+    monkeypatch.setattr(finestra, "DialogoAggiornamento", Aggiorna)
+    monkeypatch.setattr(aggiornamento, "modo_installazione", lambda: None)
+    monkeypatch.setattr(finestra.webbrowser, "open", aperte.append)
+    try:
+        app._apri_aggiornamento()
+        assert aperte == ["https://example.com/release"]
+    finally:
+        app.destroy()
+    _radice_nuova(radice)
+
+
+def test_il_controllo_aspetta_la_fine_dell_estrazione(radice, tmp_path, monkeypatch):
+    import aggiornamento
+
+    app, _ = _finestra_con_aggiornamento(radice, tmp_path, monkeypatch, None)
+    chieste = []
+    monkeypatch.setattr(aggiornamento, "cerca_aggiornamento", lambda: chieste.append(True))
+    try:
+        app._lavoro = object()  # un'estrazione in corso
+        app._controlla_aggiornamento()
+        for _ in range(10):
+            app.update()
+            time.sleep(0.03)
+        assert chieste == []
+        app._lavoro = None
+        app._controlla_aggiornamento()
+        limite = time.monotonic() + 5
+        while not chieste and time.monotonic() < limite:
+            app.update()
+            time.sleep(0.03)
+        assert chieste == [True]
+    finally:
+        app._lavoro = None
+        app.destroy()
+    _radice_nuova(radice)

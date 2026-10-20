@@ -17,15 +17,20 @@ OPZIONE = "--collaudo"
 # PDFListinoExtractor.exe --collaudo-wizard <pdf> <regole.json>: il wizard dall'analisi al salvataggio,
 # scrivendo nel file indicato e non nelle regole personali dell'utente
 OPZIONE_WIZARD = "--collaudo-wizard"
+# PDFListinoExtractor.exe --collaudo-aggiornamento <report.json>: l'aggiornamento dall'avvio alla chiusura,
+# con la variabile PDFLISTINO_URL_AGGIORNAMENTI che punta a un server locale (tools/collaudo_aggiornamento.ps1)
+OPZIONE_AGGIORNAMENTO = "--collaudo-aggiornamento"
 
 
 def collaudo_richiesto(argv: list[str]) -> bool:
-    return OPZIONE in argv or OPZIONE_WIZARD in argv
+    return OPZIONE in argv or OPZIONE_WIZARD in argv or OPZIONE_AGGIORNAMENTO in argv
 
 
 def esegui_collaudo(argv: list[str]) -> int:
     if OPZIONE_WIZARD in argv:
         return esegui_collaudo_wizard(argv)
+    if OPZIONE_AGGIORNAMENTO in argv:
+        return esegui_collaudo_aggiornamento(argv)
     i = argv.index(OPZIONE)
     pdf, xlsx = Path(argv[i + 1]), Path(argv[i + 2])
     report_path = xlsx.with_suffix(".collaudo.json")
@@ -180,3 +185,66 @@ def _collauda_wizard(pdf: Path, regole: Path, report: dict, pagina: int = 1) -> 
     report.update(salvato=salvato, bom=regole.read_bytes().startswith(b"\xef\xbb\xbf"), articoli=len(ris.articoli),
                   da_verificare=sum(1 for a in ris.articoli if a.tutte_le_anomalie()))
     report["esito"] = "ok" if salvato and report["bom"] and ris.articoli else "fallito"
+
+
+def esegui_collaudo_aggiornamento(argv: list[str]) -> int:
+    report_path = Path(argv[argv.index(OPZIONE_AGGIORNAMENTO) + 1])
+    report: dict = {"esito": "fallito"}
+    try:
+        _collauda_aggiornamento(report_path, report)
+    except Exception as e:
+        report["errore"] = f"{type(e).__name__}: {e}"
+        report["traceback"] = traceback.format_exc()
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    return 0 if report["esito"] == "ok" else 1
+
+
+def _collauda_aggiornamento(report_path: Path, report: dict) -> None:
+    """Come l'utente: il controllo all'avvio, il pulsante, poi «Aggiorna ora» senza la finestra delle
+    note (che chiede solo la scelta). Scaricamento, verifica, avvio del setup e chiusura sono quelli veri."""
+    from PIL import ImageGrab
+
+    import aggiornamento
+    from gui.main_window import FinestraPrincipale
+    from version import __version__
+
+    report.update(versione=__version__, eseguibile=sys.executable, attivo=aggiornamento.attivo(),
+                  modo=aggiornamento.modo_installazione())
+    app = FinestraPrincipale()
+    app.geometry("1280x820+20+20")
+    inizio = time.monotonic()
+
+    def attendi_pulsante():
+        if app.rilascio is None and time.monotonic() - inizio < 60:
+            app.after(200, attendi_pulsante)
+            return
+        try:
+            if app.rilascio is None:
+                report["errore"] = "nessun aggiornamento trovato"
+                app.destroy()
+                return
+            app.update()
+            x, y = app.winfo_rootx(), app.winfo_rooty()
+            ImageGrab.grab((x, y, x + app.winfo_width(), y + 160)).save(report_path.with_suffix(".png"))
+            report.update(pulsante=app.btn_aggiornamento.cget("text"), rilascio=app.rilascio.tag)
+            if report["modo"] is None:
+                report["errore"] = "programma non installato col setup"
+                app.destroy()
+                return
+            chiuso = []
+            originale = app._chiudi
+            app._chiudi = lambda: (chiuso.append(True), originale())
+            report["esito"] = "avviato"  # se _aggiorna non arriva in fondo, resta questo
+            app._aggiorna(app.rilascio, report["modo"])
+            scaricato = aggiornamento._file_scaricato(app.rilascio.versione)
+            report.update(scaricato=str(scaricato), dimensione=scaricato.stat().st_size if scaricato.exists() else 0,
+                          chiuso=bool(chiuso))
+            report["esito"] = "ok" if chiuso and scaricato.exists() else "fallito"
+        except Exception as e:
+            report["errore"] = f"{type(e).__name__}: {e}"
+            report["traceback"] = traceback.format_exc()
+            if app.winfo_exists():
+                app.destroy()
+
+    app.after(500, attendi_pulsante)
+    app.mainloop()

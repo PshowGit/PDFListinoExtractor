@@ -39,6 +39,9 @@ AVVISO ANTIVIRUS
 AGGIORNAMENTO
  Eseguire il nuovo PDFListinoExtractor_Setup.exe: sostituisce la versione installata mantenendo
  cartella, collegamenti e dati personali.
+ Dalla versione 1.7.0 il programma controlla da solo, all'avvio, se su GitHub c'e' una versione
+ nuova: in quel caso compare il pulsante "Aggiornamento disponibile", che la scarica, ne verifica
+ l'integrita' e la installa. Senza rete non succede nulla.
 
 LICENZA E SORGENTE
  Software libero con licenza GNU AGPL v3 o successive (LICENZA.txt). Il codice sorgente e' su

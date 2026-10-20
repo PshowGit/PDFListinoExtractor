@@ -3,11 +3,15 @@
 CTkInputDialog non si puo' compilare in anticipo e ha i pulsanti in inglese: per rinominare serve
 il nome attuale gia' scritto e selezionato.
 """
+import queue
+import threading
 import tkinter as tk
 
 import customtkinter as ctk
 
+import aggiornamento
 from percorsi import icona
+from version import __version__
 
 
 def in_primo_piano(finestra: tk.Misc) -> None:
@@ -114,6 +118,140 @@ class FinestraAvvisi(ctk.CTkToplevel):
     def copia(self) -> None:
         self.clipboard_clear()
         self.clipboard_append("\n".join(self.avvisi))
+
+
+def _modale(finestra: ctk.CTkToplevel) -> None:
+    if not finestra.winfo_exists():
+        return
+    finestra.lift()
+    finestra.focus_force()
+    try:
+        finestra.grab_set()  # finche' e' aperta, la finestra principale non risponde
+    except tk.TclError:
+        pass
+
+
+class DialogoAggiornamento(ctk.CTkToplevel):
+    """Le note della nuova versione e la scelta: «aggiorna», «ignora» o None (Annulla, Esc, chiusura).
+
+    Se il programma non viene da un setup (`installabile` falso) non si puo' aggiornare da qui: al
+    posto di «Aggiorna ora» c'e' la pagina della release."""
+
+    def __init__(self, master, rilascio: aggiornamento.Rilascio, installabile: bool = True):
+        super().__init__(master)
+        self.title("Aggiornamento disponibile")
+        self.geometry("680x480")
+        self.transient(master)
+        if icona().is_file():
+            self.after(250, lambda: self.winfo_exists() and self.iconbitmap(str(icona())))
+        self.scelta: str | None = None
+        ctk.CTkLabel(
+            self, anchor="w", font=ctk.CTkFont(size=15, weight="bold"),
+            text=f"E' disponibile la versione {rilascio.versione} (installata: {__version__})",
+        ).pack(fill="x", padx=16, pady=(14, 2))
+        spiegazione = (
+            "«Aggiorna ora» scarica l'installazione, ne verifica l'integrita' e la avvia: il programma si chiude "
+            "e si riapre aggiornato. Fornitori configurati, log e file Excel restano dove sono."
+            if installabile else
+            "Questa copia del programma non e' stata installata col setup, quindi non si aggiorna da sola: "
+            "l'installazione si scarica dalla pagina della versione."
+        )
+        ctk.CTkLabel(self, anchor="w", justify="left", wraplength=640, text=spiegazione).pack(
+            fill="x", padx=16, pady=(0, 6))
+        self.note = ctk.CTkTextbox(self, wrap="word")
+        self.note.pack(fill="both", expand=True, padx=12, pady=4)
+        self.note.insert("1.0", aggiornamento.testo_note(rilascio.note) or "Nessuna nota per questa versione.")
+        self.note.configure(state="disabled")
+        barra = ctk.CTkFrame(self, fg_color="transparent")
+        barra.pack(fill="x", padx=12, pady=(6, 12))
+        ctk.CTkButton(barra, text="Annulla", width=110, fg_color="gray", command=self.destroy).pack(side="right")
+        ctk.CTkButton(barra, text="Ignora questa versione", width=170, fg_color="gray",
+                      command=lambda: self._scegli("ignora")).pack(side="right", padx=8)
+        self.btn_aggiorna = ctk.CTkButton(
+            barra, text="Aggiorna ora" if installabile else "Apri la pagina di download", width=190,
+            command=lambda: self._scegli("aggiorna"),
+        )
+        self.btn_aggiorna.pack(side="left")
+        self.bind("<Escape>", lambda e: self.destroy())
+        in_primo_piano(self)
+        self.after(150, lambda: _modale(self))
+
+    def _scegli(self, scelta: str) -> None:
+        self.scelta = scelta
+        self.destroy()
+
+
+class FinestraScaricamento(ctk.CTkToplevel):
+    """Scarica il setup in un thread, con la barra di avanzamento. Alla fine `percorso` e' il file
+    scaricato e verificato, oppure None con `errore` (o niente, se si e' annullato)."""
+
+    def __init__(self, master, rilascio: aggiornamento.Rilascio, scarica=None):
+        scarica = scarica or aggiornamento.scarica
+        super().__init__(master)
+        self.title("Aggiornamento")
+        self.resizable(False, False)
+        self.transient(master)
+        if icona().is_file():
+            self.after(250, lambda: self.winfo_exists() and self.iconbitmap(str(icona())))
+        self.percorso = None
+        self.errore: str | None = None
+        self._annulla = threading.Event()
+        self._coda: queue.Queue = queue.Queue()
+        ctk.CTkLabel(self, anchor="w", text=f"Scaricamento della versione {rilascio.versione}…").pack(
+            fill="x", padx=20, pady=(16, 6))
+        self.barra = ctk.CTkProgressBar(self, width=420)
+        self.barra.set(0)
+        self.barra.pack(padx=20)
+        self.lbl = ctk.CTkLabel(self, anchor="w", text_color="gray", text="")
+        self.lbl.pack(fill="x", padx=20, pady=(4, 0))
+        ctk.CTkButton(self, text="Annulla", width=110, fg_color="gray", command=self.annulla).pack(pady=14)
+        self.protocol("WM_DELETE_WINDOW", self.annulla)
+        self.bind("<Escape>", lambda e: self.annulla())
+
+        def lavoro():
+            try:
+                esito = ("fatto", scarica(rilascio, lambda letti, totale: self._coda.put(("avanzamento", letti, totale)),
+                                          self._annulla.is_set))
+            except aggiornamento.AggiornamentoNonValido as e:
+                esito = ("errore", str(e))
+            except OSError as e:
+                esito = ("errore", f"Scaricamento non riuscito: {e}")
+            self._coda.put(esito)
+
+        threading.Thread(target=lavoro, daemon=True).start()
+        in_primo_piano(self)
+        self.after(150, lambda: _modale(self))
+        self.after(100, self._controlla)
+
+    def annulla(self) -> None:
+        self._annulla.set()
+        self.lbl.configure(text="Annullamento…")
+
+    def _controlla(self) -> None:
+        if not self.winfo_exists():
+            return
+        ultimo = None
+        try:
+            while True:
+                messaggio = self._coda.get_nowait()
+                if messaggio[0] != "avanzamento":
+                    if messaggio[0] == "fatto":
+                        self.percorso = messaggio[1]
+                    else:
+                        self.errore = messaggio[1]
+                    self.destroy()
+                    return
+                ultimo = messaggio  # si ridisegna solo l'ultimo avanzamento
+        except queue.Empty:
+            pass
+        if ultimo is not None and not self._annulla.is_set():
+            _, letti, totale = ultimo
+            if totale:
+                self.barra.set(min(letti / totale, 1))
+                self.lbl.configure(text=f"{letti / 1e6:.1f} di {totale / 1e6:.1f} MB")
+            else:
+                self.lbl.configure(text=f"{letti / 1e6:.1f} MB")
+        self.after(100, self._controlla)
 
 
 def chiedi_testo(master, titolo: str, messaggio: str, iniziale: str = "") -> str | None:

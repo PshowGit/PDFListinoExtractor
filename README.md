@@ -44,6 +44,17 @@ Nessuna colonna tecnica: le anomalie si vedono nell'anteprima e si possono salva
 **Aggiornamento**: eseguire l'installer della versione nuova. Riconosce quella già installata, usa la stessa
 cartella e sostituisce interamente le librerie. Se il programma è aperto, propone di chiuderlo.
 
+**Aggiornamento dal programma** (dalla 1.7.0): all'avvio il programma installato chiede a GitHub l'ultima
+versione pubblicata. Se ce n'è una nuova, in alto a destra compare **Aggiornamento disponibile (vX.Y.Z)**: un
+clic mostra le novità e offre *Aggiorna ora*, *Ignora questa versione* o *Annulla*. *Aggiorna ora* scarica
+l'installer in una cartella temporanea e ne controlla l'impronta SHA-256 con quella che GitHub dichiara per il
+file: se non coincide non installa nulla. Poi avvia l'installazione e chiude il programma, che si riapre
+aggiornato nella stessa cartella. Per un'installazione in Program Files Windows chiede la conferma da
+amministratore. Senza rete, o se GitHub non risponde, non succede niente: il programma funziona come sempre e il
+tentativo resta solo nel log. La versione ignorata si ricorda in `%LOCALAPPDATA%\PDFListinoExtractor\preferenze.json`.
+Avviato dal sorgente il programma non controlla nulla; una copia non installata col setup apre solo la pagina
+della versione.
+
 **Disinstallazione**: *Impostazioni → App → PDFListinoExtractor → Disinstalla*. Rimuove programma,
 collegamenti e voce in «App installate».
 
@@ -93,7 +104,9 @@ riprodurre il confronto: `set PDFLISTINO_ONEFILE=1` prima di `uv run pyinstaller
 **Collaudo dell'eseguibile**: `PDFListinoExtractor.exe --collaudo <pdf> <file.xlsx>` apre la finestra vera,
 estrae, esporta e scrive accanto all'Excel un report `.collaudo.json` e uno screenshot. Il collaudo completo
 di installazione, aggiornamento e disinstallazione è `tools\collaudo_installer.ps1` (v.
-[docs/report-test-distribuzione.md](docs/report-test-distribuzione.md)).
+[docs/report-test-distribuzione.md](docs/report-test-distribuzione.md)). L'aggiornamento dal programma si
+collauda con `tools\collaudo_aggiornamento.ps1 <setup.exe>`: serve il setup da un server locale come se fosse la
+versione 9.9.9 pubblicata e verifica scaricamento, chiusura, reinstallazione e riapertura.
 
 **Licenze.** Il programma è distribuito con licenza **GNU Affero General Public License v3.0 o successive**
 ([LICENSE](LICENSE)), la stessa di PyMuPDF, su cui si basa. Chi distribuisce l'eseguibile deve rendere

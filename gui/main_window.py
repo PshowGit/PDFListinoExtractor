@@ -1,16 +1,20 @@
 """Finestra principale: selezione PDF, estrazione in background, anteprima ed esportazione."""
 import logging
+import queue
+import threading
 import time
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
+import aggiornamento
 import config
 from config import elenco_fornitori, regole_fornitore
 from exporters.excel_exporter import EsportazioneFallita, esporta_listino, esporta_report_anomalie
 from extractors.pdf_reader import InfoPdf, PdfNonValido, verifica_pdf
-from gui.dialoghi import FinestraAvvisi, chiedi_testo, in_primo_piano
+from gui.dialoghi import DialogoAggiornamento, FinestraAvvisi, FinestraScaricamento, chiedi_testo, in_primo_piano
 from gui.lavoro import LavoroInProcesso
 from gui.page_viewer import FinestraPagina
 from gui.pannelli import pannello_diviso
@@ -50,6 +54,7 @@ class FinestraPrincipale(ctk.CTk):
         self._wizard = None
         self.avvisi: list[str] = []  # dell'ultima estrazione
         self._finestra_avvisi = None
+        self.rilascio: aggiornamento.Rilascio | None = None  # versione piu' recente, se ce n'e' una
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -59,6 +64,8 @@ class FinestraPrincipale(ctk.CTk):
         self._sezione_esportazione()
         self._aggiorna_pulsanti()
         self.protocol("WM_DELETE_WINDOW", self._chiudi)
+        if aggiornamento.attivo():
+            self.after(1500, self._controlla_aggiornamento)
         if config.avviso_regole_personali:
             self.after(300, lambda: messagebox.showwarning(
                 "Regole personali ignorate", config.avviso_regole_personali, parent=self
@@ -110,6 +117,11 @@ class FinestraPrincipale(ctk.CTk):
             trasferimento, text="Esporta fornitori…", command=self._esporta_fornitori, width=116, fg_color="gray"
         )
         self.btn_esporta_fornitori.pack(side="left", padx=(6, 0))
+        # compare solo se c'e' una versione nuova (_mostra_aggiornamento)
+        self.btn_aggiornamento = ctk.CTkButton(
+            f, text="Aggiornamento disponibile", command=self._apri_aggiornamento, width=238,
+            fg_color="#2E8B57", hover_color="#246B44",
+        )
         self.lbl_file = ctk.CTkLabel(f, text="Nessun file selezionato", anchor="w")
         self.lbl_file.grid(row=2, column=0, columnspan=3, padx=10, sticky="ew")
         self.lbl_info = ctk.CTkLabel(f, text="", anchor="w", text_color="gray")
@@ -247,6 +259,86 @@ class FinestraPrincipale(ctk.CTk):
                 f"  • {nome}" for nome in esito.gia_presenti
             ))
         messagebox.showinfo("Importa fornitori", "\n\n".join(righe) or "Nessun fornitore importato.", parent=self)
+
+    # --- aggiornamento -------------------------------------------------------------------------
+
+    def _controlla_aggiornamento(self):
+        """Chiede l'ultima release in un thread: la rete puo' metterci secondi, o non rispondere.
+
+        Non durante un'estrazione: la prima connessione HTTPS importa ssl e carica i certificati di
+        Windows tenendo il GIL per ~200 ms, e la finestra si fermava (pausa massima da 270 a 600 ms)."""
+        if self._lavoro is not None:
+            self.after(2000, self._controlla_aggiornamento)
+            return
+        coda: queue.Queue = queue.Queue()
+
+        def lavoro():
+            aggiornamento.pulisci_scaricati()
+            coda.put(aggiornamento.cerca_aggiornamento())
+
+        threading.Thread(target=lavoro, daemon=True).start()
+
+        def attendi():
+            try:
+                self._mostra_aggiornamento(coda.get_nowait())
+            except queue.Empty:
+                self.after(300, attendi)
+
+        attendi()
+
+    def _mostra_aggiornamento(self, rilascio: aggiornamento.Rilascio | None):
+        if rilascio is None or rilascio.versione == aggiornamento.versione_ignorata():
+            return
+        self.rilascio = rilascio
+        self.btn_aggiornamento.configure(text=f"Aggiornamento disponibile ({rilascio.tag})")
+        self.btn_aggiornamento.grid(row=0, column=3, padx=10, pady=(8, 2), sticky="e")
+
+    def _apri_aggiornamento(self):
+        rilascio = self.rilascio
+        modo = aggiornamento.modo_installazione()
+        dialogo = DialogoAggiornamento(self, rilascio, installabile=modo is not None)
+        self.wait_window(dialogo)
+        if dialogo.scelta == "ignora":
+            try:
+                aggiornamento.ignora_versione(rilascio.versione)
+            except OSError:
+                log.exception("Preferenza non salvata")
+            self.btn_aggiornamento.grid_remove()
+        elif dialogo.scelta == "aggiorna":
+            if modo is None:
+                webbrowser.open(rilascio.pagina)
+            else:
+                self._aggiorna(rilascio, modo)
+
+    def _aggiorna(self, rilascio: aggiornamento.Rilascio, modo: str):
+        in_corso = []
+        if self._lavoro is not None:
+            in_corso.append("l'estrazione in corso verra' interrotta")
+        if self.tabella.articoli():
+            in_corso.append("gli articoli in tabella e le correzioni non esportate andranno persi")
+        if self._wizard is not None and self._wizard.winfo_exists():
+            in_corso.append("il wizard verra' chiuso senza salvare")
+        if in_corso and not messagebox.askyesno(
+            "Aggiorna ora",
+            "Per aggiornarsi il programma si chiude: " + "; ".join(in_corso) + ".\n\nContinuare?",
+            icon="warning", parent=self,
+        ):
+            return
+        scaricamento = FinestraScaricamento(self, rilascio)
+        self.wait_window(scaricamento)
+        if scaricamento.percorso is None:
+            if scaricamento.errore:
+                messagebox.showerror("Aggiornamento non riuscito", scaricamento.errore, parent=self)
+            return
+        try:
+            aggiornamento.avvia_installazione(scaricamento.percorso, modo)
+        except OSError as e:
+            log.exception("Avvio dell'installazione non riuscito")
+            messagebox.showerror("Aggiornamento non riuscito", f"Impossibile avviare l'installazione:\n{e}",
+                                 parent=self)
+            return
+        # subito: l'installer svuota _internal e non deve trovarla in uso
+        self._chiudi()
 
     def _seleziona_pdf(self):
         percorso = filedialog.askopenfilename(
