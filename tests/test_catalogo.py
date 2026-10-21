@@ -64,6 +64,48 @@ def test_una_scritta_grande_seguita_da_una_piccola_resta_unita():
     assert _grezzi(("SW", 16, 26), (" ", 11, 5), ("Turbo Speaker Horn", 11, 105)) == ["SW Turbo Speaker Horn"]
 
 
+def _grezzi_con_font(*parti):
+    """Span grezzi attaccati uno all'altro, con il nome del font: (testo, font, larghezza)."""
+    spans, x = [], 100.0
+    for testo, font, larghezza in parti:
+        spans.append({"text": testo, "bbox": (x, 0, x + larghezza, 9), "size": 9, "font": font})
+        x += larghezza
+    return [s["text"] for s in _unisci_contigui(spans)]
+
+
+def test_etichetta_codice_e_descrizione_in_un_altro_font_sono_due_scritte():
+    # AV-MATRIX (pagine 331, 335, 336): «Articolo:» e il codice in Arial, la descrizione in Arial Narrow subito
+    # dopo, con uno span di soli spazi nel mezzo. Unita in una riga sola, la scritta finiva nella colonna della
+    # descrizione e l'articolo spariva: 43 articoli su 103
+    assert _grezzi_con_font(
+        ("Articolo:", "ArialMT", 33), (" Eagle-WB", "Arial-BoldMT", 45), (" ", "ArialNarrow-Italic", 3),
+        ("Staffa di fissaggio a parete", "ArialNarrow-Italic", 120)) == ["Articolo: Eagle-WB", " Staffa di fissaggio a parete"]
+    # il codice da solo, senza descrizione dopo, resta una scritta
+    assert _grezzi_con_font(("Articolo: ", "ArialMT", 35), ("P20-4KB", "Arial-BoldMT", 37)) == ["Articolo: P20-4KB"]
+    # un codice di piu' parole
+    assert _grezzi_con_font(
+        ("Articolo:", "ArialMT", 33), (" SHARK H4 Plus ", "Arial-BoldMT", 72), ("Controller", "ArialNarrow-Italic", 50),
+    ) == ["Articolo: SHARK H4 Plus ", "Controller"]
+
+
+def test_un_altro_font_senza_etichetta_non_separa_nulla():
+    # p65: «Ω» in Arial dentro una frase in Arial Narrow; spezzata, il resto della riga finiva in un'altra colonna
+    assert _grezzi_con_font(
+        ("Altoparlanti: 1x6” woofer - Impedenza: 8", "ArialNarrow-Italic", 150), ("Ω ", "Arial-ItalicMT", 8),
+        ("- SPL/1m", "ArialNarrow-Italic", 40)) == ["Altoparlanti: 1x6” woofer - Impedenza: 8Ω - SPL/1m"]
+    # p93: «Dimensioni: Ø 780 mm», dove il simbolo e' in un altro font, non e' un'etichetta con un codice
+    assert _grezzi_con_font(
+        ("Dimensioni: Ø", "ArialNarrow-Italic", 60), (" 780 mm", "Arial-ItalicMT", 33)) == ["Dimensioni: Ø 780 mm"]
+    # p154: un titolo in maiuscolo scritto con due font
+    assert _grezzi_con_font(
+        (" DIFFUSORI ", "Arial-BoldMT", 59), ("COASSIALI", "CenturyGothic-Bold", 51),
+        (" IN COPOLIMERO IP45/56", "Arial-BoldMT", 110)) == [" DIFFUSORI COASSIALI IN COPOLIMERO IP45/56"]
+    # lo stesso font, in grassetto e corsivo: la stessa famiglia
+    assert _grezzi_con_font(
+        ("Articolo:", "ArialMT", 33), (" Eagle-WB", "Arial-BoldMT", 45), (" Staffa", "Arial-ItalicMT", 36),
+    ) == ["Articolo: Eagle-WB Staffa"]
+
+
 def _griglia_con_piu_prezzi(percorso: Path) -> Path:
     """Una tabella a griglia: una cella con due voci (codice e prezzo ciascuna, come RSL-8/RSL-16 dell'Etabeta), una
     con un codice e due varianti (come ACT-6Dante), una con due prezzi sulla stessa riga."""
@@ -111,6 +153,45 @@ def test_piu_prezzi_nella_stessa_cella_una_riga_per_prezzo(tmp_path):
     sesto = r.articoli[6]
     assert sesto.prezzo is None and sesto.prezzo_testo == "EUR 60,00 | EUR 66,00"
     assert sesto.note_estrazione["prezzo"].startswith("Piu' prezzi")
+
+
+def _tabella_con_etichetta_nel_codice(percorso: Path, etichetta: str, con_ripetizione: bool = True) -> Path:
+    """Tre articoli il cui codice e' scritto «<etichetta>: AB-100» (AV-MATRIX dell'Etabeta: «Articolo: P20-4KB»)."""
+    import pymupdf
+
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    for x, testo in ((60, "Modello"), (160, "Descrizione"), (480, "Listino")):
+        page.insert_text((x, 100), testo, fontsize=9)
+    for i, (codice, descrizione, prezzo) in enumerate(
+            [("AB-100", "Primo articolo", "EUR 10,00"), ("AB-200", "Secondo articolo", "EUR 20,00"),
+             ("AB-300", "Terzo articolo", "EUR 30,00")]):
+        y = 125 + 25 * i
+        scritta = f"{etichetta}: {codice}" if con_ripetizione or i == 0 else codice
+        page.insert_text((60, y), scritta, fontsize=9)
+        page.insert_text((160, y), descrizione, fontsize=9)
+        page.insert_text((540 - pymupdf.get_text_length(prezzo, fontsize=9), y), prezzo, fontsize=9)
+    doc.save(percorso)
+    doc.close()
+    return percorso
+
+
+@pytest.mark.parametrize("etichetta", ["Articolo", "Art.", "Item"])
+def test_l_etichetta_ripetuta_davanti_al_modello_si_toglie(tmp_path, etichetta):
+    # nessun nome fisso: vale per qualunque etichetta con i due punti ripetuta sulle righe della colonna
+    pdf = _tabella_con_etichetta_nel_codice(tmp_path / "etichetta.pdf", etichetta)
+    a = analizza_pdf(str(pdf), 1)
+    r = estrai_listino(pdf, profilo_da_analisi(a, [c.campo_proposto for c in a.colonne]))
+    assert [(x.modello, x.prezzo) for x in r.articoli] == [
+        ("AB-100", Decimal("10.00")), ("AB-200", Decimal("20.00")), ("AB-300", Decimal("30.00"))]
+
+
+def test_un_modello_con_due_punti_non_ripetuto_resta_com_e(tmp_path):
+    # una sola riga con l'etichetta: puo' far parte del nome, non si tocca
+    pdf = _tabella_con_etichetta_nel_codice(tmp_path / "una.pdf", "Articolo", con_ripetizione=False)
+    a = analizza_pdf(str(pdf), 1)
+    r = estrai_listino(pdf, profilo_da_analisi(a, [c.campo_proposto for c in a.colonne]))
+    assert [x.modello for x in r.articoli] == ["Articolo: AB-100", "AB-200", "AB-300"]
 
 
 def test_due_prezzi_separati_da_uno_spazio_sono_due_celle():
@@ -245,6 +326,25 @@ def test_etabeta_casi_misurati(etabeta):
     assert per[(13, "HBTY")].valore("marca") == "VISSONIC"
     # legature ricomposte nei dati
     assert not any(c in x.descrizione for x in ris.articoli for c in "ﬀﬁﬂﬃƟƩƫ")
+
+
+@reale
+def test_etabeta_avmatrix_codice_e_descrizione_sulla_stessa_riga(etabeta):
+    # pagine 325-336: «Articolo: P20-4KW PTZ 4K...» e «Articolo: Eagle-WB Staffa...» sono righe sole, con codice in
+    # grassetto e descrizione in un altro font. Uniti in una scritta sola, sparivano 43 articoli su 103
+    _, ris = etabeta
+    per = {(x.pagina, x.modello): x for x in ris.articoli}
+    assert per[(331, "P20-4KW")].prezzo == Decimal("2990.00")
+    assert per[(331, "P20-4KW")].descrizione == "PTZ 4K 8MPx - Zoom 20X Ottico, 12X Digitale - 12G - Colore Bianco"
+    assert per[(331, "Eagle-WB")].prezzo == Decimal("59.00")
+    assert per[(335, "SD1141")].prezzo == Decimal("169.00")
+    assert per[(336, "TB-C41")].prezzo == Decimal("989.00")
+    # l'etichetta «Articolo:» ripetuta su ogni riga non e' parte del modello
+    assert not [x for x in ris.articoli if 325 <= x.pagina <= 336 and x.modello.startswith("Articolo:")]
+    # misurato: 93 articoli su 103 con codice e prezzo giusti. Restano persi 8 codici lunghi («SHARK H4 Plus»:
+    # il testo da x=179 a 284 si sovrappone alla descrizione per 46,3 pt e al modello per 45,7, perche' le
+    # colonne vengono dalla pagina 22, dove il codice comincia a 167) e le descrizioni impilate sotto il codice
+    assert sum(1 for x in ris.articoli if 325 <= x.pagina <= 336) >= 93
 
 
 @reale

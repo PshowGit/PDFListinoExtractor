@@ -50,6 +50,32 @@ def _e_bollino(prec: dict, s: dict) -> bool:
             and s["size"] > (1 + SCARTO_CORPO_UNIONE) * prec["size"])
 
 
+_STILE_NEL_FONT = re.compile(r"^.*\+|[-,].*$|(MT|PS)$")
+
+
+def _famiglia(font: str | None) -> str:
+    """Il nome del font senza prefisso del sottoinsieme, stile e suffisso: «Arial-BoldItalicMT» e «ArialMT» sono Arial."""
+    return _STILE_NEL_FONT.sub("", _STILE_NEL_FONT.sub("", font or ""))
+
+
+# «Articolo: SHARK H4 Plus»: un'etichetta con i due punti a inizio riga e al piu' tre parole di valore, la prima
+# di almeno due caratteri («Dimensioni: Ø 780 mm», p93, ha un simbolo in un altro font: non e' un codice)
+_ETICHETTA_E_CODICE = re.compile(r"^\s*[^\W\d_][\w.]*:\s*(?=\S*\w\w)\S+(?:\s+\S+){0,2}\s*$")
+
+
+def _codice_e_descrizione(prec: dict, s: dict) -> bool:
+    """Se `prec` e' «etichetta: codice» e `s` e' scritto in un'altra famiglia di font, dopo uno spazio.
+
+    Etabeta, pagine di AV-MATRIX: «Articolo:» e il codice in Arial, la descrizione in Arial Narrow sulla stessa
+    riga. Uniti, il codice non e' piu' un codice e l'articolo sparisce. Serve l'etichetta: un «Ω» o una virgoletta
+    in Arial dentro una frase in Arial Narrow (p65) o un titolo in maiuscolo scritto con due font (p154) non sono
+    un codice, e un grassetto o un corsivo della stessa famiglia non separa nulla.
+    """
+    a, b = _famiglia(prec.get("font")), _famiglia(s.get("font"))
+    return bool(a and b and a != b and (prec["text"][-1:].isspace() or s["text"][:1].isspace())
+                and _ETICHETTA_E_CODICE.match(prec["text"]))
+
+
 def _unisci_contigui(spans: list[dict]) -> list[dict]:
     """Spans di una riga PyMuPDF uniti quando si toccano: "Proge" + "Ʃ" + "ato" e' una parola sola.
 
@@ -65,18 +91,21 @@ def _unisci_contigui(spans: list[dict]) -> list[dict]:
             stessa_riga = abs(s["bbox"][1] - prec["bbox"][1]) < 0.5 * max(s["size"], 1)
             dopo_bollino = prec.get("bollino") and abs(s["size"] - prec["size"]) > SCARTO_CORPO_UNIONE * prec["size"]
             if (stessa_riga and -0.5 <= distacco < UNIONE_SENZA_SPAZIO * max(s["size"], prec["size"])
-                    and not _e_bollino(prec, s) and not dopo_bollino and not _due_numeri(prec, s)):
+                    and not _e_bollino(prec, s) and not dopo_bollino and not _due_numeri(prec, s)
+                    and not _codice_e_descrizione(prec, s)):
                 b0, b1 = prec["bbox"], s["bbox"]
                 uniti[-1] = {
                     "text": prec["text"] + s["text"],
                     "bbox": (b0[0], min(b0[1], b1[1]), b1[2], max(b0[3], b1[3])),
                     "size": max(prec["size"], s["size"]),
+                    "font": s.get("font"),
                 }
                 continue
             if stessa_riga and _e_bollino(prec, s):
-                uniti.append({"text": s["text"], "bbox": tuple(s["bbox"]), "size": s["size"], "bollino": True})
+                uniti.append({"text": s["text"], "bbox": tuple(s["bbox"]), "size": s["size"], "bollino": True,
+                              "font": s.get("font")})
                 continue
-        uniti.append({"text": s["text"], "bbox": tuple(s["bbox"]), "size": s["size"]})
+        uniti.append({"text": s["text"], "bbox": tuple(s["bbox"]), "size": s["size"], "font": s.get("font")})
     return uniti
 
 

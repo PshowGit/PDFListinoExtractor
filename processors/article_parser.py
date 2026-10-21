@@ -6,6 +6,7 @@ Il profilo dice solo quale colonna contiene quale campo; tutte le distanze si ri
 prezzo non manca mai. Cosi' un prezzo mancante diventa un'anomalia segnalata invece di fondere due
 articoli in uno.
 """
+import collections
 import itertools
 import re
 import statistics
@@ -160,6 +161,31 @@ def unisci_righe(testi: list[str], vocabolario: Vocabolario | None = None) -> st
 
 def _pulito(testo: str) -> str:
     return _SPAZI.sub(" ", testo).strip()
+
+
+# «Articolo: P20-4KB»: una parola con i due punti, poi il valore
+_ETICHETTA_DAVANTI = re.compile(r"^([^\W\d_][\w.]*:)\s+\S")
+# quante righe della colonna devono cominciare con la stessa etichetta, e quale quota delle righe della colonna
+ETICHETTE_RIPETUTE_MINIME = 3
+QUOTA_ETICHETTA_RIPETUTA = 0.4
+
+
+def _etichetta_ripetuta(righe: list[Riga]) -> str | None:
+    """L'etichetta con i due punti che apre le righe di una colonna di una tabella, se la ripetono in tante.
+
+    AV-MATRIX, nell'Etabeta, scrive ogni codice come «Articolo: P20-4KB»: l'etichetta non e' parte del modello.
+    Una riga sola («Nota: ...») puo' essere il nome, e non si tocca.
+    """
+    conteggio = collections.Counter(m.group(1) for r in righe if (m := _ETICHETTA_DAVANTI.match(_pulito(r.testo))))
+    if not conteggio:
+        return None
+    etichetta, n = conteggio.most_common(1)[0]
+    return etichetta if n >= ETICHETTE_RIPETUTE_MINIME and n >= QUOTA_ETICHETTA_RIPETUTA * len(righe) else None
+
+
+def _senza_etichetta(testo: str, etichetta: str | None) -> str:
+    pulito = _pulito(testo)
+    return pulito[len(etichetta):].strip() if etichetta and pulito.startswith(etichetta) else testo
 
 
 def _nominata(marca: str, spans: list[Span]) -> bool:
@@ -632,7 +658,10 @@ class ParserListino:
                 chiave = self._chiave(col)
                 # solo nel testo libero un trattino a capo puo' spezzare una parola: modelli ed EAN sono codici
                 parole = self.vocabolario if pc["campo"] in ("descrizione", TESTO_GENERICO) else None
-                testo = unisci_righe([r.testo for r in righe], parole)
+                testi = [r.testo for r in righe]
+                if pc["campo"] == "modello":
+                    testi[0] = _senza_etichetta(testi[0], _etichetta_ripetuta(t.righe.get(n, [])))
+                testo = unisci_righe(testi, parole)
                 attuale = art.valore(chiave)
                 self._scrivi(art, chiave, unisci_righe([attuale, testo], parole) if attuale else testo)
         mappati = self._campi_mappati(t)
